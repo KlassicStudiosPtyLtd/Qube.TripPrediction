@@ -26,6 +26,31 @@
             },
             "cwd": "${workspaceFolder}"
         },
+         {
+            "name": "Fleet Analyzer - Single Shift - Perth Time",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-06-17 06:00:00",
+                "--end-date", "2025-06-17 18:00:00",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./output/port_berth_analysis",
+                "--shift-hours", "12",
+                "--target-trips", "4",
+                "--start-waypoint", "Port Berth_PHEVG250606",
+                "--end-waypoint", "Port Berth_PHEVG250606",
+                "--waypoint-matching", "exact",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
         {
             "name": "Fleet Analyzer - Sydney Time",
             "type": "debugpy",

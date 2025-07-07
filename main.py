@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Fleet Shift Analyzer - Main entry point with timezone support
+Enhanced to support both date-only and datetime inputs
 """
 import click
 import logging
@@ -16,25 +17,51 @@ from core.utils import setup_logging
 logger = logging.getLogger(__name__)
 
 
-def convert_local_to_utc(local_date_str: str, timezone_str: str) -> datetime:
+def parse_datetime_string(datetime_str: str, timezone_str: str, is_end_date: bool = False) -> datetime:
     """
-    Convert a local date string to UTC datetime.
+    Parse a datetime string that could be either a date or datetime.
     
     Args:
-        local_date_str: Date string in format 'YYYY-MM-DD'
+        datetime_str: Date or datetime string in format 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
         timezone_str: Timezone string (e.g., 'Australia/Perth', 'US/Eastern')
+        is_end_date: If True and only date is provided, set to end of day
         
     Returns:
         UTC datetime object
     """
-    # Parse the date string
-    local_date = datetime.strptime(local_date_str, "%Y-%m-%d")
-    
     # Get the timezone
     local_tz = pytz.timezone(timezone_str)
     
-    # Localize to the specified timezone (start of day)
-    local_datetime = local_tz.localize(local_date)
+    # Try to parse as datetime first, then fall back to date
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d"
+    ]
+    
+    parsed_datetime = None
+    for fmt in formats:
+        try:
+            parsed_datetime = datetime.strptime(datetime_str, fmt)
+            break
+        except ValueError:
+            continue
+    
+    if parsed_datetime is None:
+        raise ValueError(f"Could not parse datetime string: {datetime_str}. "
+                        f"Expected formats: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS")
+    
+    # If only date was provided, set appropriate time
+    if len(datetime_str) <= 10:  # Only date provided
+        if is_end_date:
+            # Set to end of day for end dates
+            parsed_datetime = parsed_datetime.replace(hour=23, minute=59, second=59)
+        # else: start of day (00:00:00) is already set by default
+    
+    # Localize to the specified timezone
+    local_datetime = local_tz.localize(parsed_datetime)
     
     # Convert to UTC
     utc_datetime = local_datetime.astimezone(pytz.UTC)
@@ -63,9 +90,12 @@ def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
 
 @click.command()
 @click.option('--fleet-id', type=int, required=True, help='Fleet ID to analyze')
-@click.option('--start-date', required=True, help='Start date (YYYY-MM-DD) in local timezone')
-@click.option('--end-date', required=True, help='End date (YYYY-MM-DD) in local timezone')
-@click.option('--timezone', default='Australia/Perth', help='Timezone for dates (e.g., Australia/Perth, US/Eastern)')
+@click.option('--start-date', required=True, 
+              help='Start date/time in local timezone. Formats: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS')
+@click.option('--end-date', required=True, 
+              help='End date/time in local timezone. Formats: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS')
+@click.option('--timezone', default='Australia/Perth', 
+              help='Timezone for dates (e.g., Australia/Perth, US/Eastern)')
 @click.option('--output-dir', default='./fleet_shift_analysis', help='Output directory')
 @click.option('--shift-hours', default=12, type=float, help='Shift duration in hours')
 @click.option('--target-trips', default=4, type=int, help='Target trips per shift')
@@ -86,11 +116,18 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
     """
     Analyze fleet-wide shift completion and generate trip predictions.
     
-    When start_waypoint and end_waypoint are specified, only trips between
-    these waypoints will be analyzed. Otherwise, all waypoint-to-waypoint
-    trips will be included.
+    Date/time inputs can be provided in the following formats:
+    - Date only: YYYY-MM-DD (assumes 00:00:00 for start, 23:59:59 for end)
+    - Date and time: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD HH:MM
     
     Times are specified in the local timezone and converted to UTC for API calls.
+    
+    Examples:
+        # Analyze full day
+        --start-date 2025-06-17 --end-date 2025-06-17
+        
+        # Analyze specific time period
+        --start-date "2025-06-17 06:00:00" --end-date "2025-06-17 18:00:00"
     """
     # Set up logging
     setup_logging(log_level)
@@ -112,19 +149,26 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
         logger.info(f"Waypoint Matching: {waypoint_matching}")
     
     try:
-        # Convert dates to UTC
-        start_datetime_utc = convert_local_to_utc(start_date, timezone)
-        end_datetime_utc = convert_local_to_utc(end_date, timezone)
+        # Parse dates/times with enhanced parser
+        start_datetime_utc = parse_datetime_string(start_date, timezone, is_end_date=False)
+        end_datetime_utc = parse_datetime_string(end_date, timezone, is_end_date=True)
         
-        # Set end time to end of day in local timezone
-        end_date_eod = datetime.strptime(end_date, "%Y-%m-%d")
-        end_date_eod = end_date_eod.replace(hour=23, minute=59, second=59)
-        local_tz = pytz.timezone(timezone)
-        end_datetime_local = local_tz.localize(end_date_eod)
-        end_datetime_utc = end_datetime_local.astimezone(pytz.UTC)
+        # Validate date range
+        if end_datetime_utc <= start_datetime_utc:
+            logger.error("End date/time must be after start date/time")
+            return
         
-        logger.info(f"UTC Date Range: {start_datetime_utc.strftime('%Y-%m-%d %H:%M:%S')} to "
-                   f"{end_datetime_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+        # Log the parsed times
+        tz = pytz.timezone(timezone)
+        start_local = start_datetime_utc.astimezone(tz)
+        end_local = end_datetime_utc.astimezone(tz)
+        
+        logger.info(f"Parsed time range ({timezone}):")
+        logger.info(f"  Start: {start_local.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        logger.info(f"  End: {end_local.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        logger.info(f"UTC time range:")
+        logger.info(f"  Start: {start_datetime_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        logger.info(f"  End: {end_datetime_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         
         # Initialize configurations with timezone
         shift_config = ShiftConfig(
@@ -134,7 +178,7 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
             start_waypoint=start_waypoint,
             end_waypoint=end_waypoint,
             waypoint_matching=waypoint_matching,
-            timezone=timezone  # Add timezone to config
+            timezone=timezone
         )
         
         analysis_config = AnalysisConfig(
@@ -162,6 +206,9 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
         if fleet_summary:
             print_analysis_summary(fleet_summary, start_waypoint, end_waypoint, timezone)
         
+    except ValueError as e:
+        logger.error(f"Date parsing error: {str(e)}")
+        logger.info("Hint: Use format 'YYYY-MM-DD' for dates or 'YYYY-MM-DD HH:MM:SS' for date+time")
     except Exception as e:
         logger.error(f"Error during analysis: {str(e)}", exc_info=True)
 
