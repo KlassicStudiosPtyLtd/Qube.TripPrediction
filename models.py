@@ -1,25 +1,34 @@
 """
-Data models for fleet shift analyzer.
+Data models for fleet shift analyzer with timezone support.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
+import pytz
 
 
 @dataclass
 class Trip:
-    """Represents a single trip."""
+    """Represents a single trip with timezone-aware timestamps."""
     trip_id: str
     vehicle_id: int
     driver_id: Optional[str]
     start_place: str
     end_place: str
-    start_time: datetime
-    end_time: datetime
+    start_time: datetime  # Should be timezone-aware
+    end_time: datetime    # Should be timezone-aware
     duration_minutes: float
     distance_m: float
     route: List[Dict[str, Any]]
     is_round_trip: bool
+    
+    def __post_init__(self):
+        """Ensure timestamps are timezone-aware."""
+        # If timestamps are naive, assume they're UTC
+        if self.start_time.tzinfo is None:
+            self.start_time = pytz.UTC.localize(self.start_time)
+        if self.end_time.tzinfo is None:
+            self.end_time = pytz.UTC.localize(self.end_time)
     
     @property
     def distance_km(self) -> float:
@@ -45,13 +54,21 @@ class Trip:
 
 @dataclass
 class Shift:
-    """Represents a driver shift."""
+    """Represents a driver shift with timezone-aware timestamps."""
     shift_id: str
     vehicle_id: int
     driver_id: Optional[str]
-    start_time: datetime
-    end_time: datetime
+    start_time: datetime  # Should be timezone-aware
+    end_time: datetime    # Should be timezone-aware
     trips: List[Trip] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Ensure timestamps are timezone-aware."""
+        # If timestamps are naive, assume they're UTC
+        if self.start_time.tzinfo is None:
+            self.start_time = pytz.UTC.localize(self.start_time)
+        if self.end_time.tzinfo is None:
+            self.end_time = pytz.UTC.localize(self.end_time)
     
     @property
     def duration_hours(self) -> float:
@@ -72,20 +89,26 @@ class Shift:
             'start_time': self.start_time.isoformat(),
             'end_time': self.end_time.isoformat(),
             'duration_hours': self.duration_hours,
-            'trips': [trip.to_dict() for trip in self.trips]
+            'trips': [trip.to_dict() for trip in self.trips],
+            'trips_completed': self.trips_completed
         }
 
 
 @dataclass
 class TripPrediction:
-    """Prediction result for a trip."""
+    """Prediction result for a trip with timezone-aware timestamps."""
     estimated_duration_minutes: float
     confidence_score: float
-    estimated_completion_time: datetime
+    estimated_completion_time: datetime  # Should be timezone-aware
     will_complete_in_shift: bool
     risk_level: str  # 'low', 'medium', 'high'
     recommendation: str
     factors: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Ensure timestamp is timezone-aware."""
+        if self.estimated_completion_time.tzinfo is None:
+            self.estimated_completion_time = pytz.UTC.localize(self.estimated_completion_time)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -126,9 +149,9 @@ class ShiftAnalysis:
 
 @dataclass
 class Alert:
-    """Represents an alert."""
+    """Represents an alert with timezone-aware timestamps."""
     alert_id: str
-    timestamp: datetime
+    timestamp: datetime  # Should be timezone-aware
     vehicle_id: int
     vehicle_name: str
     driver_id: Optional[str]
@@ -137,6 +160,11 @@ class Alert:
     message: str
     details: Dict[str, Any] = field(default_factory=dict)
     actions_required: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Ensure timestamp is timezone-aware."""
+        if self.timestamp.tzinfo is None:
+            self.timestamp = pytz.UTC.localize(self.timestamp)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

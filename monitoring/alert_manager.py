@@ -1,9 +1,10 @@
 """
-Alert management for shift analysis.
+Alert management for shift analysis with timezone support.
 """
 import logging
 from datetime import datetime
 from typing import List, Dict, Any
+import pytz
 
 from models import Alert
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class AlertManager:
-    """Manages alert generation and tracking."""
+    """Manages alert generation and tracking with timezone awareness."""
     
     def __init__(self):
         self.alert_history = []
@@ -37,12 +38,15 @@ class AlertManager:
     
     def _create_alert(self, vehicle_id: int, vehicle_name: str, 
                      shift_analysis: Dict[str, Any]) -> Alert:
-        """Create an alert from shift analysis."""
+        """Create an alert from shift analysis with timezone-aware timestamp."""
         shift = shift_analysis.get('shift', {})
         
+        # Create timezone-aware timestamp
+        now = datetime.now(pytz.UTC)
+        
         return Alert(
-            alert_id=f"ALERT_{vehicle_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            timestamp=datetime.now(),
+            alert_id=f"ALERT_{vehicle_id}_{now.strftime('%Y%m%d_%H%M%S')}",
+            timestamp=now,  # Already timezone-aware
             vehicle_id=vehicle_id,
             vehicle_name=vehicle_name,
             driver_id=shift.get('driver_id'),

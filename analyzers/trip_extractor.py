@@ -1,9 +1,10 @@
 """
-Trip extraction from vehicle history data.
+Trip extraction from vehicle history data with timezone support.
 """
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
+import pytz
 
 import pandas as pd
 from geopy.distance import geodesic
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class TripExtractor:
-    """Extracts trips from vehicle history data."""
+    """Extracts trips from vehicle history data with timezone awareness."""
     
     def __init__(self, config: ShiftConfig):
         self.config = config
@@ -25,12 +26,13 @@ class TripExtractor:
     def extract_trips(self, vehicle_data: Dict[str, Any]) -> List[Trip]:
         """
         Extract trips from vehicle history based on waypoint events.
+        All timestamps are converted to timezone-aware UTC.
         
         Args:
             vehicle_data: Vehicle history data
             
         Returns:
-            List of Trip objects
+            List of Trip objects with timezone-aware timestamps
         """
         history = vehicle_data.get('history', [])
         if not history:
@@ -41,7 +43,14 @@ class TripExtractor:
         if 'deviceTimeUtc' not in df.columns:
             return []
         
+        # Convert timestamps to timezone-aware UTC
         df['timestamp'] = pd.to_datetime(df['deviceTimeUtc'])
+        # Ensure timestamps are timezone-aware (UTC)
+        if df['timestamp'].dt.tz is None:
+            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+        else:
+            df['timestamp'] = df['timestamp'].dt.tz_convert('UTC')
+        
         df = df.sort_values('timestamp')
         
         # Extract trips based on configuration
@@ -70,7 +79,7 @@ class TripExtractor:
         Extract trips between specific start and end waypoints.
         
         Args:
-            df: Vehicle history DataFrame
+            df: Vehicle history DataFrame with timezone-aware timestamps
             vehicle_id: Vehicle ID
             start_waypoint: Name of start waypoint
             end_waypoint: Name of end waypoint
@@ -205,7 +214,7 @@ class TripExtractor:
     
     def _create_trip_from_waypoints(self, df: pd.DataFrame, trip_data: Dict[str, Any],
                                   vehicle_id: int) -> Optional[Trip]:
-        """Create a Trip object from waypoint data."""
+        """Create a Trip object from waypoint data with timezone-aware timestamps."""
         start_idx = trip_data['start_idx']
         end_idx = trip_data['end_idx']
         
@@ -233,15 +242,24 @@ class TripExtractor:
         # Determine if round trip
         is_round_trip = trip_data['start_place'] == trip_data['end_place']
         
+        # Ensure timestamps are timezone-aware
+        start_time = trip_data['start_time']
+        end_time = trip_data['end_time']
+        
+        if start_time.tzinfo is None:
+            start_time = pytz.UTC.localize(start_time)
+        if end_time.tzinfo is None:
+            end_time = pytz.UTC.localize(end_time)
+        
         # Create Trip object
         return Trip(
-            trip_id=f"{vehicle_id}_{trip_data['start_time'].strftime('%Y%m%d_%H%M%S')}",
+            trip_id=f"{vehicle_id}_{start_time.strftime('%Y%m%d_%H%M%S')}",
             vehicle_id=vehicle_id,
             driver_id=trip_data.get('driver_id'),
             start_place=trip_data['start_place'],
             end_place=trip_data['end_place'],
-            start_time=trip_data['start_time'],
-            end_time=trip_data['end_time'],
+            start_time=start_time,
+            end_time=end_time,
             duration_minutes=round(duration, 1),
             distance_m=round(total_distance, 1),
             route=route_points,
@@ -306,7 +324,7 @@ class TripExtractor:
     
     def _finalize_trip(self, trip_data: Dict, df: pd.DataFrame, 
                       vehicle_id: int) -> Optional[Trip]:
-        """Finalize a trip and create Trip object."""
+        """Finalize a trip and create Trip object with timezone-aware timestamps."""
         # Calculate metrics
         duration = (trip_data['last_arr_time'] - trip_data['start_time']).total_seconds() / 60
         
@@ -323,15 +341,24 @@ class TripExtractor:
         # Extract route points
         route_points = self._extract_route_points(route_df)
         
+        # Ensure timestamps are timezone-aware
+        start_time = trip_data['start_time']
+        end_time = trip_data['last_arr_time']
+        
+        if hasattr(start_time, 'tzinfo') and start_time.tzinfo is None:
+            start_time = pytz.UTC.localize(start_time)
+        if hasattr(end_time, 'tzinfo') and end_time.tzinfo is None:
+            end_time = pytz.UTC.localize(end_time)
+        
         # Create Trip object
         return Trip(
-            trip_id=f"{vehicle_id}_{trip_data['start_time'].strftime('%Y%m%d_%H%M%S')}",
+            trip_id=f"{vehicle_id}_{start_time.strftime('%Y%m%d_%H%M%S')}",
             vehicle_id=vehicle_id,
             driver_id=trip_data.get('driver_id'),
             start_place=trip_data['start_place'],
             end_place=trip_data['end_place'],
-            start_time=trip_data['start_time'],
-            end_time=trip_data['last_arr_time'],
+            start_time=start_time,
+            end_time=end_time,
             duration_minutes=round(duration, 1),
             distance_m=round(total_distance, 1),
             route=route_points,
@@ -348,10 +375,17 @@ class TripExtractor:
         route_points = []
         
         for _, point in route_df.iterrows():
+            timestamp = point['timestamp']
+            # Convert to ISO format string with timezone
+            if hasattr(timestamp, 'isoformat'):
+                timestamp_str = timestamp.isoformat()
+            else:
+                timestamp_str = str(timestamp)
+            
             route_points.append({
                 'lat': float(point['latitude']),
                 'lon': float(point['longitude']),
-                'timestamp': point['timestamp'].isoformat(),
+                'timestamp': timestamp_str,
                 'speed_kmh': float(point.get('speedKmh', 0)),
                 'place_name': point.get('placeName'),
                 'reason_code': point.get('reasonCode')

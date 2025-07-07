@@ -1,5 +1,5 @@
 """
-Utility Module
+Utility Module with Unicode support
 
 This module provides utility functions for the MTDATA fleet analyzer,
 including configuration loading, logging setup, and data processing.
@@ -85,7 +85,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     # Try to load from YAML file if provided
     if config_path and os.path.exists(config_path):
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 yaml_config = yaml.safe_load(f)
                 config = deep_update(config, yaml_config)
         except Exception as e:
@@ -178,7 +178,7 @@ def calculate_time_window(days: int) -> tuple:
 
 def save_json_data(data: Dict[str, Any], output_dir: str, filename: str) -> str:
     """
-    Save data to a JSON file.
+    Save data to a JSON file with UTF-8 encoding.
     
     Args:
         data: Data to save
@@ -194,9 +194,9 @@ def save_json_data(data: Dict[str, Any], output_dir: str, filename: str) -> str:
     # Create the full file path
     file_path = os.path.join(output_dir, filename)
     
-    # Save the data to the file
-    with open(file_path, 'w') as f:
-        json.dump(data, f, indent=2)
+    # Save the data to the file with UTF-8 encoding
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
     
     return file_path
 
@@ -218,9 +218,9 @@ def create_summary_csv(output_dir: str, data: List[Dict[str, Any]]) -> str:
     # Create a DataFrame from the data
     df = pd.DataFrame(data)
     
-    # Save the DataFrame to CSV
+    # Save the DataFrame to CSV with UTF-8 encoding
     csv_path = os.path.join(output_dir, "summary.csv")
-    df.to_csv(csv_path, index=False)
+    df.to_csv(csv_path, index=False, encoding='utf-8')
     
     return csv_path
 

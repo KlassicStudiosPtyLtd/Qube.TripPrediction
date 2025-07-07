@@ -1,9 +1,10 @@
 """
-Trip completion prediction logic.
+Trip completion prediction logic with timezone support.
 """
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+import pytz
 
 import numpy as np
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class TripPredictor:
-    """Predicts trip completion times and probabilities."""
+    """Predicts trip completion times and probabilities with timezone awareness."""
     
     def __init__(self, config: ShiftConfig):
         self.config = config
@@ -27,12 +28,16 @@ class TripPredictor:
         
         Args:
             shift: Current shift
-            current_time: Current time
+            current_time: Current time (should be timezone-aware)
             trips_already_completed: Number of trips already completed
             
         Returns:
             TripPrediction object
         """
+        # Ensure current_time is timezone-aware
+        if current_time.tzinfo is None:
+            current_time = pytz.UTC.localize(current_time)
+        
         # Extract prediction factors
         factors = self._extract_prediction_factors(
             shift, current_time, trips_already_completed
@@ -52,7 +57,7 @@ class TripPredictor:
             base_duration, factors
         )
         
-        # Calculate completion time
+        # Calculate completion time (maintains timezone)
         completion_time = current_time + timedelta(minutes=adjusted_duration)
         
         # Check if completion is within shift
@@ -83,8 +88,12 @@ class TripPredictor:
     def _extract_prediction_factors(self, shift: Shift, current_time: datetime,
                                   trips_completed: int) -> Dict[str, Any]:
         """Extract factors affecting trip duration."""
-        # Time-based factors
-        hour_of_day = current_time.hour
+        # Time-based factors (use local hour if timezone info available)
+        if hasattr(current_time, 'hour'):
+            hour_of_day = current_time.hour
+        else:
+            hour_of_day = 12  # Default to noon
+            
         is_peak_hour = 6 <= hour_of_day <= 9 or 16 <= hour_of_day <= 19
         
         # Shift progress factors

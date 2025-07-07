@@ -1,9 +1,10 @@
 """
-Shift analysis logic.
+Shift analysis logic with timezone support.
 """
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+import pytz
 
 import numpy as np
 
@@ -15,21 +16,22 @@ logger = logging.getLogger(__name__)
 
 
 class ShiftAnalyzer:
-    """Analyzes shifts for completion prediction."""
+    """Analyzes shifts for completion prediction with timezone support."""
     
     def __init__(self, config: ShiftConfig):
         self.config = config
         self.predictor = TripPredictor(config)
         
     def analyze_shifts(self, vehicle_id: int, vehicle_name: str, 
-                      trips: List[Trip]) -> List[ShiftAnalysis]:
+                      trips: List[Trip], timezone: str = 'UTC') -> List[ShiftAnalysis]:
         """
         Analyze all shifts for a vehicle.
         
         Args:
             vehicle_id: Vehicle ID
             vehicle_name: Vehicle display name
-            trips: List of trips
+            trips: List of trips (with UTC times)
+            timezone: Timezone for shift boundaries
             
         Returns:
             List of ShiftAnalysis objects
@@ -37,8 +39,8 @@ class ShiftAnalyzer:
         if not trips:
             return []
         
-        # Group trips into shifts
-        shifts = self._group_trips_into_shifts(vehicle_id, trips)
+        # Group trips into shifts considering timezone
+        shifts = self._group_trips_into_shifts(vehicle_id, trips, timezone)
         
         # Analyze each shift
         shift_analyses = []
@@ -50,27 +52,39 @@ class ShiftAnalyzer:
         
         return shift_analyses
     
-    def _group_trips_into_shifts(self, vehicle_id: int, trips: List[Trip]) -> List[Shift]:
-        """Group trips into shifts based on time windows."""
+    def _group_trips_into_shifts(self, vehicle_id: int, trips: List[Trip], 
+                                timezone: str) -> List[Shift]:
+        """Group trips into shifts based on time windows and timezone."""
         if not trips:
             return []
         
         # Sort trips by start time
         sorted_trips = sorted(trips, key=lambda t: t.start_time)
         
+        # Get timezone object
+        tz = pytz.timezone(timezone)
+        
         shifts = []
         current_shift_trips = []
-        shift_start = None
+        shift_start_utc = None
         shift_count = 0
         
         for trip in sorted_trips:
             if not current_shift_trips:
                 # Start new shift
                 current_shift_trips = [trip]
-                shift_start = trip.start_time
+                shift_start_utc = trip.start_time
+                
+                # Convert to local time to determine shift boundaries
+                shift_start_local = shift_start_utc.astimezone(tz)
+                
+                # Determine shift start time in local timezone (could be start of day, etc.)
+                # For now, we'll use the actual trip start time
+                shift_start_local = shift_start_local
+                
             else:
                 # Check if trip belongs to current shift
-                hours_since_shift_start = (trip.start_time - shift_start).total_seconds() / 3600
+                hours_since_shift_start = (trip.start_time - shift_start_utc).total_seconds() / 3600
                 
                 if hours_since_shift_start <= self.config.shift_duration_hours:
                     current_shift_trips.append(trip)
@@ -78,18 +92,18 @@ class ShiftAnalyzer:
                     # Create shift and start new one
                     shift_count += 1
                     shift = self._create_shift(
-                        vehicle_id, shift_start, current_shift_trips, shift_count
+                        vehicle_id, shift_start_utc, current_shift_trips, shift_count
                     )
                     shifts.append(shift)
                     
                     current_shift_trips = [trip]
-                    shift_start = trip.start_time
+                    shift_start_utc = trip.start_time
         
         # Add last shift
         if current_shift_trips:
             shift_count += 1
             shift = self._create_shift(
-                vehicle_id, shift_start, current_shift_trips, shift_count
+                vehicle_id, shift_start_utc, current_shift_trips, shift_count
             )
             shifts.append(shift)
         
@@ -97,7 +111,11 @@ class ShiftAnalyzer:
     
     def _create_shift(self, vehicle_id: int, start_time: datetime,
                      trips: List[Trip], shift_number: int) -> Shift:
-        """Create a Shift object."""
+        """Create a Shift object with UTC times."""
+        # Ensure start_time is timezone-aware
+        if start_time.tzinfo is None:
+            start_time = pytz.UTC.localize(start_time)
+        
         end_time = start_time + timedelta(hours=self.config.shift_duration_hours)
         driver_id = trips[0].driver_id if trips else None
         
@@ -133,6 +151,10 @@ class ShiftAnalyzer:
         
         # Get last trip end time
         last_trip_end = shift.trips[-1].end_time if shift.trips else shift.start_time
+        
+        # Ensure last_trip_end is timezone-aware
+        if last_trip_end.tzinfo is None:
+            last_trip_end = pytz.UTC.localize(last_trip_end)
         
         # Calculate remaining time
         remaining_time = (shift.end_time - last_trip_end).total_seconds() / 60

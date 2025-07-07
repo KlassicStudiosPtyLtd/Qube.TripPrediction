@@ -1,5 +1,5 @@
 """
-Configuration module for fleet shift analyzer.
+Configuration module for fleet shift analyzer with timezone support.
 """
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
@@ -21,6 +21,9 @@ class ShiftConfig:
     end_waypoint: Optional[str] = None
     waypoint_matching: str = 'exact'  # 'exact', 'contains', 'normalized'
     
+    # Timezone configuration
+    timezone: str = 'UTC'  # Default to UTC, can be overridden
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -33,7 +36,8 @@ class ShiftConfig:
             'fatigue_factor_base': self.fatigue_factor_base,
             'start_waypoint': self.start_waypoint,
             'end_waypoint': self.end_waypoint,
-            'waypoint_matching': self.waypoint_matching
+            'waypoint_matching': self.waypoint_matching,
+            'timezone': self.timezone
         }
 
 

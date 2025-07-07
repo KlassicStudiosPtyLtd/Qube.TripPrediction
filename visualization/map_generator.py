@@ -1,5 +1,5 @@
 """
-Map generation for fleet shift analysis.
+Map generation for fleet shift analysis with Unicode support.
 """
 import logging
 from pathlib import Path
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class MapGenerator:
-    """Generates map visualizations."""
+    """Generates map visualizations with proper Unicode handling."""
     
     def create_alert_map(self, alerts: List[Any], vehicle_analyses: Dict[str, Any], 
                         output_file: Path):
@@ -60,5 +60,6 @@ class MapGenerator:
                 icon=folium.Icon(color=color, icon='warning')
             ).add_to(m)
         
+        # Save with UTF-8 encoding
         m.save(str(output_file))
         logger.info(f"Alert map saved to {output_file}")

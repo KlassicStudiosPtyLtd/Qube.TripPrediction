@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Fleet Shift Analyzer - Main entry point
+Fleet Shift Analyzer - Main entry point with timezone support
 """
 import click
 import logging
 from typing import Dict, Any
+from datetime import datetime
+import pytz
 
 from core.mtdata_api_client import MTDataApiClient
 from config import ShiftConfig, AnalysisConfig
@@ -14,10 +16,56 @@ from core.utils import setup_logging
 logger = logging.getLogger(__name__)
 
 
+def convert_local_to_utc(local_date_str: str, timezone_str: str) -> datetime:
+    """
+    Convert a local date string to UTC datetime.
+    
+    Args:
+        local_date_str: Date string in format 'YYYY-MM-DD'
+        timezone_str: Timezone string (e.g., 'Australia/Perth', 'US/Eastern')
+        
+    Returns:
+        UTC datetime object
+    """
+    # Parse the date string
+    local_date = datetime.strptime(local_date_str, "%Y-%m-%d")
+    
+    # Get the timezone
+    local_tz = pytz.timezone(timezone_str)
+    
+    # Localize to the specified timezone (start of day)
+    local_datetime = local_tz.localize(local_date)
+    
+    # Convert to UTC
+    utc_datetime = local_datetime.astimezone(pytz.UTC)
+    
+    return utc_datetime
+
+
+def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
+    """
+    Convert UTC datetime to local timezone.
+    
+    Args:
+        utc_datetime: UTC datetime object
+        timezone_str: Timezone string
+        
+    Returns:
+        Local datetime object
+    """
+    if utc_datetime.tzinfo is None:
+        # If naive datetime, assume it's UTC
+        utc_datetime = pytz.UTC.localize(utc_datetime)
+    
+    local_tz = pytz.timezone(timezone_str)
+    return utc_datetime.astimezone(local_tz)
+
+
 @click.command()
 @click.option('--fleet-id', type=int, required=True, help='Fleet ID to analyze')
-@click.option('--start-date', required=True, help='Start date (YYYY-MM-DD)')
-@click.option('--end-date', required=True, help='End date (YYYY-MM-DD)')
+@click.option('--start-date', required=True, help='Start date (YYYY-MM-DD) in local timezone')
+@click.option('--end-date', required=True, help='End date (YYYY-MM-DD) in local timezone')
+@click.option('--timezone', default='Australia/Perth', help='Timezone for dates (e.g., Australia/Perth, US/Eastern)')
 @click.option('--output-dir', default='./fleet_shift_analysis', help='Output directory')
 @click.option('--shift-hours', default=12, type=float, help='Shift duration in hours')
 @click.option('--target-trips', default=4, type=int, help='Target trips per shift')
@@ -31,7 +79,7 @@ logger = logging.getLogger(__name__)
 @click.option('--parallel', is_flag=True, default=True, help='Enable parallel processing')
 @click.option('--max-workers', default=4, type=int, help='Maximum parallel workers')
 @click.option('--log-level', default='INFO', help='Logging level')
-def main(fleet_id: int, start_date: str, end_date: str, output_dir: str,
+def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_dir: str,
          shift_hours: float, target_trips: int, buffer_minutes: int,
          start_waypoint: str, end_waypoint: str, waypoint_matching: str,
          parallel: bool, max_workers: int, log_level: str):
@@ -41,27 +89,52 @@ def main(fleet_id: int, start_date: str, end_date: str, output_dir: str,
     When start_waypoint and end_waypoint are specified, only trips between
     these waypoints will be analyzed. Otherwise, all waypoint-to-waypoint
     trips will be included.
+    
+    Times are specified in the local timezone and converted to UTC for API calls.
     """
     # Set up logging
     setup_logging(log_level)
     
     logger.info("Starting Fleet Shift Analysis")
     logger.info(f"Fleet ID: {fleet_id}")
-    logger.info(f"Date Range: {start_date} to {end_date}")
+    logger.info(f"Date Range: {start_date} to {end_date} ({timezone})")
+    
+    # Validate timezone
+    try:
+        pytz.timezone(timezone)
+    except pytz.exceptions.UnknownTimeZoneError:
+        logger.error(f"Unknown timezone: {timezone}")
+        logger.info("Common timezones: Australia/Perth, Australia/Sydney, US/Eastern, US/Pacific, Europe/London")
+        return
     
     if start_waypoint and end_waypoint:
         logger.info(f"Waypoint Route: {start_waypoint} → {end_waypoint}")
         logger.info(f"Waypoint Matching: {waypoint_matching}")
     
     try:
-        # Initialize configurations
+        # Convert dates to UTC
+        start_datetime_utc = convert_local_to_utc(start_date, timezone)
+        end_datetime_utc = convert_local_to_utc(end_date, timezone)
+        
+        # Set end time to end of day in local timezone
+        end_date_eod = datetime.strptime(end_date, "%Y-%m-%d")
+        end_date_eod = end_date_eod.replace(hour=23, minute=59, second=59)
+        local_tz = pytz.timezone(timezone)
+        end_datetime_local = local_tz.localize(end_date_eod)
+        end_datetime_utc = end_datetime_local.astimezone(pytz.UTC)
+        
+        logger.info(f"UTC Date Range: {start_datetime_utc.strftime('%Y-%m-%d %H:%M:%S')} to "
+                   f"{end_datetime_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Initialize configurations with timezone
         shift_config = ShiftConfig(
             shift_duration_hours=shift_hours,
             target_trips=target_trips,
             buffer_time_minutes=buffer_minutes,
             start_waypoint=start_waypoint,
             end_waypoint=end_waypoint,
-            waypoint_matching=waypoint_matching
+            waypoint_matching=waypoint_matching,
+            timezone=timezone  # Add timezone to config
         )
         
         analysis_config = AnalysisConfig(
@@ -76,17 +149,18 @@ def main(fleet_id: int, start_date: str, end_date: str, output_dir: str,
         # Create analyzer
         analyzer = FleetAnalyzer(api_client, shift_config, analysis_config)
         
-        # Run analysis
+        # Run analysis with UTC times
         fleet_summary = analyzer.analyze_fleet(
             fleet_id=fleet_id,
-            start_date=start_date,
-            end_date=end_date,
-            output_dir=output_dir
+            start_datetime=start_datetime_utc,
+            end_datetime=end_datetime_utc,
+            output_dir=output_dir,
+            timezone=timezone
         )
         
         # Print summary
         if fleet_summary:
-            print_analysis_summary(fleet_summary, start_waypoint, end_waypoint)
+            print_analysis_summary(fleet_summary, start_waypoint, end_waypoint, timezone)
         
     except Exception as e:
         logger.error(f"Error during analysis: {str(e)}", exc_info=True)
@@ -94,13 +168,15 @@ def main(fleet_id: int, start_date: str, end_date: str, output_dir: str,
 
 def print_analysis_summary(fleet_summary: Dict[str, Any], 
                          start_waypoint: str = None, 
-                         end_waypoint: str = None):
-    """Print analysis summary to console."""
+                         end_waypoint: str = None,
+                         timezone: str = 'UTC'):
+    """Print analysis summary to console with timezone-aware times."""
     summary = fleet_summary.get('fleet_summary', {})
     
     print(f"\n{'='*60}")
     print("FLEET SHIFT ANALYSIS SUMMARY")
     print(f"{'='*60}")
+    print(f"Timezone: {timezone}")
     
     if start_waypoint and end_waypoint:
         print(f"Route: {start_waypoint} → {end_waypoint}")
@@ -161,11 +237,18 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
             shift_info = shift.get('shift', {})
             metrics = shift.get('metrics', {})
             
+            # Convert UTC times to local timezone for display
+            shift_start_utc = datetime.fromisoformat(shift_info.get('start_time', '').replace('Z', '+00:00'))
+            shift_end_utc = datetime.fromisoformat(shift_info.get('end_time', '').replace('Z', '+00:00'))
+            
+            shift_start_local = convert_utc_to_local(shift_start_utc, timezone)
+            shift_end_local = convert_utc_to_local(shift_end_utc, timezone)
+            
             # Extract data
-            shift_date = shift_info.get('start_time', '')[:10]
+            shift_date = shift_start_local.strftime('%Y-%m-%d')
             driver_id = str(shift_info.get('driver_id', 'Unknown'))
-            shift_start = shift_info.get('start_time', '')
-            shift_end = shift_info.get('end_time', '')
+            shift_start = shift_start_local.strftime('%Y-%m-%d %H:%M:%S')
+            shift_end = shift_end_local.strftime('%Y-%m-%d %H:%M:%S')
             trips_completed = metrics.get('trips_completed', 0)
             target_trips = metrics.get('trips_target', 0)
             target_met = 'Yes' if shift.get('can_complete_target', False) else 'No'
@@ -177,10 +260,6 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
             vehicle_name_display = vehicle_name[:col_widths['Vehicle Name']-1] + '.' if len(vehicle_name) > col_widths['Vehicle Name'] else vehicle_name
             driver_id_display = driver_id[:col_widths['Driver ID']-1] + '.' if len(driver_id) > col_widths['Driver ID'] else driver_id
             recommendation_display = recommendation[:col_widths['Recommendation']-1] + '.' if len(recommendation) > col_widths['Recommendation'] else recommendation
-            
-            # Format dates for display
-            shift_start_display = shift_start.replace('T', ' ')[:19] if shift_start else ''
-            shift_end_display = shift_end.replace('T', ' ')[:19] if shift_end else ''
             
             # Color coding for risk level
             if risk_level == 'high' or risk_level == 'critical':
@@ -198,8 +277,8 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
                 f"{shift_date:<{col_widths['Shift Date']}} | "
                 f"{vehicle_name_display:<{col_widths['Vehicle Name']}} | "
                 f"{driver_id_display:<{col_widths['Driver ID']}} | "
-                f"{shift_start_display:<{col_widths['Shift Start']}} | "
-                f"{shift_end_display:<{col_widths['Shift End']}} | "
+                f"{shift_start:<{col_widths['Shift Start']}} | "
+                f"{shift_end:<{col_widths['Shift End']}} | "
                 f"{trips_completed:<{col_widths['Trips']}} | "
                 f"{target_trips:<{col_widths['Target']}} | "
                 f"{target_met:<{col_widths['Met']}} | "

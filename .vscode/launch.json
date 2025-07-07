@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Fleet Analyzer - Port Berth Round Trip",
+            "name": "Fleet Analyzer - Perth Time",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
@@ -10,6 +10,7 @@
                 "--fleet-id", "104002",
                 "--start-date", "2025-06-17",
                 "--end-date", "2025-06-17",
+                "--timezone", "Australia/Perth",
                 "--output-dir", "./output/port_berth_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
@@ -26,7 +27,7 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Fleet Analyzer - Port Berth Round Trip (Debug)",
+            "name": "Fleet Analyzer - Sydney Time",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
@@ -34,13 +35,14 @@
                 "--fleet-id", "104002",
                 "--start-date", "2025-06-17",
                 "--end-date", "2025-06-17",
-                "--output-dir", "./output/port_berth_debug",
+                "--timezone", "Australia/Sydney",
+                "--output-dir", "./output/sydney_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
                 "--start-waypoint", "Port Berth_PHEVG250606",
                 "--end-waypoint", "Port Berth_PHEVG250606",
                 "--waypoint-matching", "exact",
-                "--log-level", "DEBUG"
+                "--log-level", "INFO"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
@@ -50,7 +52,7 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Fleet Analyzer - All Waypoints",
+            "name": "Fleet Analyzer - US Eastern Time",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
@@ -58,7 +60,30 @@
                 "--fleet-id", "104002",
                 "--start-date", "2025-06-17",
                 "--end-date", "2025-06-17",
-                "--output-dir", "./output/all_waypoints",
+                "--timezone", "US/Eastern",
+                "--output-dir", "./output/us_eastern_analysis",
+                "--shift-hours", "12",
+                "--target-trips", "4",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Fleet Analyzer - UTC (Default)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-06-17",
+                "--end-date", "2025-06-17",
+                "--timezone", "UTC",
+                "--output-dir", "./output/utc_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
                 "--log-level", "INFO"

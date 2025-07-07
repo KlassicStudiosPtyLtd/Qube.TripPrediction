@@ -1,21 +1,29 @@
 """
-Dashboard generation for fleet shift analysis.
+Dashboard generation for fleet shift analysis with timezone support.
 """
 import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
+import pytz
 
 logger = logging.getLogger(__name__)
 
 
 class DashboardGenerator:
-    """Generates HTML dashboards."""
+    """Generates HTML dashboards with timezone awareness."""
     
-    def create_fleet_dashboard(self, fleet_summary: Dict[str, Any], output_file: Path):
-        """Create fleet performance dashboard."""
+    def create_fleet_dashboard(self, fleet_summary: Dict[str, Any], output_file: Path, 
+                             timezone: str = 'UTC'):
+        """Create fleet performance dashboard with timezone information."""
         summary = fleet_summary.get('fleet_summary', {})
         alerts = fleet_summary.get('alerts', [])
+        analysis_period = fleet_summary.get('analysis_period', {})
+        
+        # Convert current time to specified timezone
+        now_utc = datetime.now(pytz.UTC)
+        tz = pytz.timezone(timezone)
+        now_local = now_utc.astimezone(tz)
         
         html_content = f"""
         <!DOCTYPE html>
@@ -35,6 +43,13 @@ class DashboardGenerator:
                     padding: 20px;
                     border-radius: 8px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                .header-info {{
+                    background-color: #f8f9fa;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                    border-left: 4px solid #007bff;
                 }}
                 .summary-grid {{
                     display: grid;
@@ -85,12 +100,21 @@ class DashboardGenerator:
                 .completion-rate {{
                     color: {'#28a745' if summary.get('target_completion_rate', 0) >= 0.8 else '#dc3545'};
                 }}
+                .timezone-info {{
+                    font-size: 14px;
+                    color: #6c757d;
+                }}
             </style>
         </head>
         <body>
             <div class="container">
                 <h1>Fleet Shift Performance Analysis</h1>
-                <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                
+                <div class="header-info">
+                    <p><strong>Report Generated:</strong> {now_local.strftime('%Y-%m-%d %H:%M:%S')} {timezone}</p>
+                    <p><strong>Analysis Period:</strong> {self._format_analysis_period(analysis_period, timezone)}</p>
+                    <p class="timezone-info"><em>All times displayed in {timezone} timezone</em></p>
+                </div>
                 
                 <div class="summary-grid">
                     <div class="summary-card">
@@ -115,27 +139,67 @@ class DashboardGenerator:
                     </div>
                 </div>
                 
-                {self._generate_alerts_table(alerts)}
+                {self._generate_alerts_table(alerts, timezone)}
+                
+                {self._generate_shift_details_table(fleet_summary, timezone)}
             </div>
         </body>
         </html>
         """
         
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
         logger.info(f"Dashboard saved to {output_file}")
     
-    def _generate_alerts_table(self, alerts: List[Dict[str, Any]]) -> str:
-        """Generate alerts table HTML."""
+    def _format_analysis_period(self, period: Dict[str, Any], timezone: str) -> str:
+        """Format the analysis period for display."""
+        if not period:
+            return "Unknown"
+        
+        try:
+            # Parse UTC times
+            start_utc = datetime.fromisoformat(period.get('start_utc', '').replace('Z', '+00:00'))
+            end_utc = datetime.fromisoformat(period.get('end_utc', '').replace('Z', '+00:00'))
+            
+            # Convert to local timezone
+            tz = pytz.timezone(timezone)
+            start_local = start_utc.astimezone(tz)
+            end_local = end_utc.astimezone(tz)
+            
+            # Format based on whether it's same day or multiple days
+            if start_local.date() == end_local.date():
+                return f"{start_local.strftime('%Y-%m-%d')} ({start_local.strftime('%H:%M')} - {end_local.strftime('%H:%M')})"
+            else:
+                return f"{start_local.strftime('%Y-%m-%d %H:%M')} to {end_local.strftime('%Y-%m-%d %H:%M')}"
+        except:
+            return "Invalid period"
+    
+    def _generate_alerts_table(self, alerts: List[Dict[str, Any]], timezone: str) -> str:
+        """Generate alerts table HTML with timezone-aware times."""
         if not alerts:
-            return "<p>No active alerts.</p>"
+            return "<p style='color: #28a745; font-weight: bold;'>✓ No active alerts - all shifts operating normally.</p>"
         
         rows = ""
         for alert in alerts[:20]:  # Show top 20 alerts
             severity_class = f"alert-{alert.get('severity', 'low')}"
+            
+            # Convert timestamp to local timezone if available
+            timestamp_str = alert.get('timestamp', '')
+            if timestamp_str:
+                try:
+                    timestamp_utc = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    tz = pytz.timezone(timezone)
+                    timestamp_local = timestamp_utc.astimezone(tz)
+                    time_display = timestamp_local.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    time_display = timestamp_str
+            else:
+                time_display = 'Unknown'
+            
             rows += f"""
             <tr class="{severity_class}">
+                <td>{time_display}</td>
                 <td>{alert.get('vehicle_name', 'Unknown')}</td>
                 <td>{alert.get('driver_id', 'Unknown')}</td>
                 <td>{alert.get('shift_date', 'Unknown')}</td>
@@ -148,11 +212,105 @@ class DashboardGenerator:
         <h2>Active Alerts</h2>
         <table>
             <tr>
+                <th>Alert Time</th>
                 <th>Vehicle</th>
                 <th>Driver</th>
                 <th>Shift Date</th>
                 <th>Severity</th>
                 <th>Message</th>
+            </tr>
+            {rows}
+        </table>
+        """
+    
+    def _generate_shift_details_table(self, fleet_summary: Dict[str, Any], timezone: str) -> str:
+        """Generate shift details table with timezone-aware times."""
+        vehicle_analyses = fleet_summary.get('vehicle_analyses', {})
+        
+        if not vehicle_analyses:
+            return ""
+        
+        rows = ""
+        tz = pytz.timezone(timezone)
+        
+        # Collect all shifts
+        all_shifts = []
+        
+        for vehicle_id, analysis in vehicle_analyses.items():
+            vehicle_name = analysis.get('vehicle_name', f'Vehicle_{vehicle_id}')
+            
+            for shift_analysis in analysis.get('shift_analyses', []):
+                shift = shift_analysis.get('shift', {})
+                metrics = shift_analysis.get('metrics', {})
+                
+                # Convert times to local timezone
+                try:
+                    start_utc = datetime.fromisoformat(shift.get('start_time', '').replace('Z', '+00:00'))
+                    end_utc = datetime.fromisoformat(shift.get('end_time', '').replace('Z', '+00:00'))
+                    
+                    start_local = start_utc.astimezone(tz)
+                    end_local = end_utc.astimezone(tz)
+                    
+                    shift_date = start_local.strftime('%Y-%m-%d')
+                    shift_times = f"{start_local.strftime('%H:%M')} - {end_local.strftime('%H:%M')}"
+                except:
+                    shift_date = "Invalid"
+                    shift_times = "Invalid"
+                
+                all_shifts.append({
+                    'date': shift_date,
+                    'vehicle_name': vehicle_name,
+                    'driver_id': shift.get('driver_id', 'Unknown'),
+                    'shift_times': shift_times,
+                    'trips_completed': metrics.get('trips_completed', 0),
+                    'trips_target': metrics.get('trips_target', 0),
+                    'can_complete': shift_analysis.get('can_complete_target', False),
+                    'risk_level': shift_analysis.get('risk_level', 'unknown'),
+                    'recommendation': shift_analysis.get('recommendation', '')
+                })
+        
+        # Sort by date
+        all_shifts.sort(key=lambda x: x['date'])
+        
+        # Generate rows
+        for shift in all_shifts[:50]:  # Show top 50 shifts
+            risk_class = ''
+            if shift['risk_level'] in ['high', 'critical']:
+                risk_class = 'alert-high'
+            elif shift['risk_level'] == 'medium':
+                risk_class = 'alert-medium'
+            
+            completion_symbol = '✓' if shift['can_complete'] else '✗'
+            completion_color = '#28a745' if shift['can_complete'] else '#dc3545'
+            
+            rows += f"""
+            <tr class="{risk_class}">
+                <td>{shift['date']}</td>
+                <td>{shift['vehicle_name']}</td>
+                <td>{shift['driver_id']}</td>
+                <td>{shift['shift_times']}</td>
+                <td>{shift['trips_completed']}/{shift['trips_target']}</td>
+                <td style="color: {completion_color}; font-weight: bold;">{completion_symbol}</td>
+                <td>{shift['risk_level'].upper()}</td>
+                <td>{shift['recommendation']}</td>
+            </tr>
+            """
+        
+        if not rows:
+            return ""
+        
+        return f"""
+        <h2>Shift Details</h2>
+        <table>
+            <tr>
+                <th>Date</th>
+                <th>Vehicle</th>
+                <th>Driver</th>
+                <th>Shift Times</th>
+                <th>Trips</th>
+                <th>Target Met</th>
+                <th>Risk Level</th>
+                <th>Recommendation</th>
             </tr>
             {rows}
         </table>
