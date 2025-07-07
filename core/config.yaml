@@ -1,0 +1,65 @@
+# MTDATA Fleet Analyzer Configuration
+
+# API Configuration
+api:
+  # Authentication - use either username/password OR token
+  # Username for MTDATA API
+  username: ""
+  
+  # Password for MTDATA API
+  password: ""
+  
+  # API token (deprecated, prefer username/password)
+  token: ""
+  
+  # Base URL for the MTDATA API
+  base_url: "https://api-transport.mtdata.com.au"
+  
+  # API Stack (optional, will use default from auth response if not specified)
+  stack: "MTD-QUBELOGISTICS"
+  
+  # Maximum number of retry attempts for transient errors
+  retry_count: 3
+  
+  # Request timeout in seconds
+  request_timeout_seconds: 30
+  
+  # Base backoff time in seconds for retries (uses exponential backoff)
+  retry_backoff: 2.0
+
+# Output Configuration
+output:
+  # Directory for output files
+  dir: "./output"
+
+# Time Window Configuration
+time_window:
+  # Number of days to look back
+  days: 7
+
+# Parallel Processing Configuration
+parallel:
+  # Number of parallel workers (1 for sequential processing)
+  workers: 1
+
+# Segment Analysis Configuration
+segments:
+  # Whether to generate segment analysis
+  enabled: false
+  
+  # Minimum segment length in meters
+  min_length: 500.0
+  
+  # Minimum number of traversals for a valid segment
+  min_traversals: 5
+  
+  # Distance in meters to use for clustering
+  cluster_distance: 50.0
+  
+  # Whether to consider direction when identifying segments
+  directional: true
+
+# Driver Fuel Analysis Configuration
+driver_fuel:
+  # Whether to analyze fuel consumption by driver
+  enabled: false
