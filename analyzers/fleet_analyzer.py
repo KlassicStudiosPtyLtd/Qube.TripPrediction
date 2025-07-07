@@ -176,8 +176,8 @@ class FleetAnalyzer:
                 logger.error(f"Error analyzing vehicle {vehicle_name}: {str(e)}")
     
     def _analyze_single_vehicle(self, vehicle: Dict[str, Any], fleet_id: int,
-                              start_datetime: datetime, end_datetime: datetime,
-                              output_path: Path, timezone: str) -> Optional[tuple]:
+                          start_datetime: datetime, end_datetime: datetime,
+                          output_path: Path, timezone: str) -> Optional[tuple]:
         """Analyze a single vehicle."""
         vehicle_id = vehicle['id']
         vehicle_name = vehicle.get('displayName', f'Vehicle_{vehicle_id}')
@@ -194,9 +194,10 @@ class FleetAnalyzer:
             # Extract trips (they'll be in UTC)
             trips = self.trip_extractor.extract_trips(history_data)
             
-            # Analyze shifts with timezone awareness
+            # Analyze shifts with timezone awareness AND analysis end time
             shift_analyses = self.shift_analyzer.analyze_shifts(
-                vehicle_id, vehicle_name, trips, timezone
+                vehicle_id, vehicle_name, trips, timezone, 
+                analysis_end_time=end_datetime  # Pass the analysis end time
             )
             
             # Create vehicle analysis

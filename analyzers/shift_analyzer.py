@@ -1,5 +1,5 @@
 """
-Shift analysis logic with timezone support.
+Shift analysis logic with timezone support and analysis period boundaries.
 """
 import logging
 from datetime import datetime, timedelta
@@ -21,9 +21,11 @@ class ShiftAnalyzer:
     def __init__(self, config: ShiftConfig):
         self.config = config
         self.predictor = TripPredictor(config)
+        self.analysis_end_time = None  # Will be set by analyze_shifts
         
     def analyze_shifts(self, vehicle_id: int, vehicle_name: str, 
-                      trips: List[Trip], timezone: str = 'UTC') -> List[ShiftAnalysis]:
+                      trips: List[Trip], timezone: str = 'UTC',
+                      analysis_end_time: Optional[datetime] = None) -> List[ShiftAnalysis]:
         """
         Analyze all shifts for a vehicle.
         
@@ -32,6 +34,7 @@ class ShiftAnalyzer:
             vehicle_name: Vehicle display name
             trips: List of trips (with UTC times)
             timezone: Timezone for shift boundaries
+            analysis_end_time: End time of the analysis period (UTC)
             
         Returns:
             List of ShiftAnalysis objects
@@ -39,7 +42,10 @@ class ShiftAnalyzer:
         if not trips:
             return []
         
-        # Group trips into shifts considering timezone
+        # Store analysis end time for shift boundary calculations
+        self.analysis_end_time = analysis_end_time
+        
+        # Group trips into shifts considering timezone and analysis period
         shifts = self._group_trips_into_shifts(vehicle_id, trips, timezone)
         
         # Analyze each shift
@@ -111,13 +117,25 @@ class ShiftAnalyzer:
     
     def _create_shift(self, vehicle_id: int, start_time: datetime,
                      trips: List[Trip], shift_number: int) -> Shift:
-        """Create a Shift object with UTC times."""
+        """Create a Shift object with UTC times, respecting analysis period boundaries."""
         # Ensure start_time is timezone-aware
         if start_time.tzinfo is None:
             start_time = pytz.UTC.localize(start_time)
         
-        end_time = start_time + timedelta(hours=self.config.shift_duration_hours)
+        # Calculate theoretical shift end time
+        theoretical_end_time = start_time + timedelta(hours=self.config.shift_duration_hours)
+        
+        # If we have an analysis end time, cap the shift end time
+        if self.analysis_end_time:
+            end_time = min(theoretical_end_time, self.analysis_end_time)
+        else:
+            end_time = theoretical_end_time
+        
         driver_id = trips[0].driver_id if trips else None
+        
+        # Log if shift was truncated
+        if self.analysis_end_time and theoretical_end_time > self.analysis_end_time:
+            logger.debug(f"Shift {shift_number} for vehicle {vehicle_id} truncated to analysis end time")
         
         return Shift(
             shift_id=f"{vehicle_id}_{start_time.strftime('%Y%m%d')}_{shift_number}",

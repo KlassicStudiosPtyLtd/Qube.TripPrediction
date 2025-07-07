@@ -217,7 +217,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
                          start_waypoint: str = None, 
                          end_waypoint: str = None,
                          timezone: str = 'UTC'):
-    """Print analysis summary to console with timezone-aware times."""
+    """Print analysis summary to console with timezone-aware times and trip details."""
     summary = fleet_summary.get('fleet_summary', {})
     
     print(f"\n{'='*60}")
@@ -274,11 +274,25 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
     print("-" * 150)
     
     # Collect all shifts from all vehicles
-    all_shifts = []
     vehicle_analyses = fleet_summary.get('vehicle_analyses', {})
     
-    for vehicle_id, analysis in vehicle_analyses.items():
+    # Sort vehicles by ID for consistent ordering
+    sorted_vehicles = sorted(vehicle_analyses.items(), key=lambda x: x[0])
+    
+    for vehicle_id, analysis in sorted_vehicles:
         vehicle_name = analysis.get('vehicle_name', f'Vehicle_{vehicle_id}')
+        
+        # Get all trips for this vehicle
+        all_trips = analysis.get('trips', [])
+        
+        # Skip vehicles with no trips
+        if not all_trips:
+            continue
+        
+        # Print vehicle header
+        print(f"\n{'='*150}")
+        print(f"VEHICLE: {vehicle_name} (ID: {vehicle_id})")
+        print(f"{'='*150}")
         
         for shift in analysis.get('shift_analyses', []):
             shift_info = shift.get('shift', {})
@@ -319,7 +333,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
                 risk_display = f"\033[92m{risk_level:<{col_widths['Risk']}}\033[0m"  # Green
                 alert_display = f"{alert_required:<{col_widths['Alert']}}"
             
-            # Print row
+            # Print shift row
             row = (
                 f"{shift_date:<{col_widths['Shift Date']}} | "
                 f"{vehicle_name_display:<{col_widths['Vehicle Name']}} | "
@@ -333,25 +347,84 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
                 f"{alert_display} | "
                 f"{recommendation_display:<{col_widths['Recommendation']}}"
             )
+            print(row)
             
-            # Store for sorting
-            all_shifts.append({
-                'date': shift_date,
-                'row': row,
-                'risk_level': risk_level
-            })
-    
-    # Sort by date and risk level
-    all_shifts.sort(key=lambda x: (x['date'], x['risk_level'] == 'high', x['risk_level'] == 'medium'))
-    
-    # Print sorted rows
-    for shift in all_shifts:
-        print(shift['row'])
+            # Print trip details for this shift
+            shift_trips = shift_info.get('trips', [])
+            if shift_trips:
+                print(f"\n  {'Trip Details for this shift:':<30}")
+                print(f"  {'-'*120}")
+                print(f"  {'Trip #':<8} | {'Start Location':<25} | {'End Location':<25} | "
+                      f"{'Start Time':<20} | {'End Time':<20} | {'Duration':<12} | {'Distance':<10}")
+                print(f"  {'-'*120}")
+                
+                for i, trip in enumerate(shift_trips, 1):
+                    # Convert trip times to local timezone
+                    trip_start_utc = datetime.fromisoformat(trip.get('start_time', '').replace('Z', '+00:00'))
+                    trip_end_utc = datetime.fromisoformat(trip.get('end_time', '').replace('Z', '+00:00'))
+                    
+                    trip_start_local = convert_utc_to_local(trip_start_utc, timezone)
+                    trip_end_local = convert_utc_to_local(trip_end_utc, timezone)
+                    
+                    # Format trip data
+                    start_loc = trip.get('start_place', 'Unknown')[:24] + '.' if len(trip.get('start_place', 'Unknown')) > 25 else trip.get('start_place', 'Unknown')
+                    end_loc = trip.get('end_place', 'Unknown')[:24] + '.' if len(trip.get('end_place', 'Unknown')) > 25 else trip.get('end_place', 'Unknown')
+                    trip_start_str = trip_start_local.strftime('%Y-%m-%d %H:%M:%S')
+                    trip_end_str = trip_end_local.strftime('%Y-%m-%d %H:%M:%S')
+                    duration_str = f"{trip.get('duration_minutes', 0):.1f} min"
+                    distance_str = f"{trip.get('distance_m', 0) / 1000:.2f} km"
+                    
+                    # Highlight round trips
+                    if trip.get('is_round_trip', False):
+                        trip_marker = f"Trip {i} (R)"
+                    else:
+                        trip_marker = f"Trip {i}"
+                    
+                    print(f"  {trip_marker:<8} | {start_loc:<25} | {end_loc:<25} | "
+                          f"{trip_start_str:<20} | {trip_end_str:<20} | {duration_str:<12} | {distance_str:<10}")
+                
+                # Print shift trip summary
+                total_duration = sum(t.get('duration_minutes', 0) for t in shift_trips)
+                total_distance = sum(t.get('distance_m', 0) for t in shift_trips) / 1000
+                avg_duration = total_duration / len(shift_trips) if shift_trips else 0
+                avg_distance = total_distance / len(shift_trips) if shift_trips else 0
+                
+                print(f"  {'-'*120}")
+                print(f"  {'SHIFT TOTALS:':<8} {'':<25} {'':<25} {'':<20} {'':<20} "
+                      f"{f'{total_duration:.1f} min':<12} | {f'{total_distance:.2f} km':<10}")
+                print(f"  {'AVERAGES:':<8} {'':<25} {'':<25} {'':<20} {'':<20} "
+                      f"{f'{avg_duration:.1f} min':<12} | {f'{avg_distance:.2f} km':<10}")
+                print(f"  {'-'*120}\n")
+            else:
+                print("  No trips completed in this shift\n")
     
     # Print summary statistics at the bottom
     print(f"\n{'='*150}")
     print("SUMMARY STATISTICS")
     print(f"{'='*150}")
+    
+    # Calculate fleet-wide trip statistics
+    total_trips = 0
+    total_duration = 0
+    total_distance = 0
+    vehicles_with_trips = 0
+    
+    for vehicle_id, analysis in vehicle_analyses.items():
+        trips = analysis.get('trips', [])
+        if trips:  # Only count vehicles that have trips
+            vehicles_with_trips += 1
+            total_trips += len(trips)
+            total_duration += sum(t.get('duration_minutes', 0) for t in trips)
+            total_distance += sum(t.get('distance_m', 0) for t in trips) / 1000
+    
+    if total_trips > 0:
+        print(f"\nFLEET-WIDE TRIP STATISTICS:")
+        print(f"  • Vehicles with Trips: {vehicles_with_trips} out of {summary.get('total_vehicles_analyzed', 0)}")
+        print(f"  • Total Trips Completed: {total_trips}")
+        print(f"  • Total Duration: {total_duration:.1f} minutes ({total_duration/60:.1f} hours)")
+        print(f"  • Total Distance: {total_distance:.2f} km")
+        print(f"  • Average Trip Duration: {total_duration/total_trips:.1f} minutes")
+        print(f"  • Average Trip Distance: {total_distance/total_trips:.2f} km")
     
     # Show alerts
     alerts = fleet_summary.get('alerts', [])
