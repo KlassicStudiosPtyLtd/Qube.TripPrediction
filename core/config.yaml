@@ -42,6 +42,20 @@ parallel:
   # Number of parallel workers (1 for sequential processing)
   workers: 1
 
+# Shift Configuration
+shift:
+  # Default trip duration in minutes when no historical data is available
+  default_trip_duration_minutes: 45.0
+  
+  # Shift duration in hours
+  shift_duration_hours: 12.0
+  
+  # Target number of trips per shift
+  target_trips: 4
+  
+  # Buffer time in minutes before shift end
+  buffer_time_minutes: 30
+
 # Segment Analysis Configuration
 segments:
   # Whether to generate segment analysis

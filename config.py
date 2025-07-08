@@ -15,6 +15,7 @@ class ShiftConfig:
     min_trip_duration_minutes: int = 10
     min_trip_distance_m: float = 500
     fatigue_factor_base: float = 0.05
+    default_trip_duration_minutes: float = 45.0  # New parameter
     
     # Waypoint configuration
     start_waypoint: Optional[str] = None
@@ -34,6 +35,7 @@ class ShiftConfig:
             'min_trip_duration_minutes': self.min_trip_duration_minutes,
             'min_trip_distance_m': self.min_trip_distance_m,
             'fatigue_factor_base': self.fatigue_factor_base,
+            'default_trip_duration_minutes': self.default_trip_duration_minutes,
             'start_waypoint': self.start_waypoint,
             'end_waypoint': self.end_waypoint,
             'waypoint_matching': self.waypoint_matching,

@@ -100,6 +100,8 @@ def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
 @click.option('--shift-hours', default=12, type=float, help='Shift duration in hours')
 @click.option('--target-trips', default=4, type=int, help='Target trips per shift')
 @click.option('--buffer-minutes', default=30, type=int, help='Buffer time before shift end')
+@click.option('--default-trip-duration', default=45, type=float, 
+              help='Default trip duration in minutes when no historical data available')
 @click.option('--start-waypoint', default=None, help='Start waypoint for trips')
 @click.option('--end-waypoint', default=None, help='End waypoint for trips')
 @click.option('--waypoint-matching', 
@@ -111,6 +113,7 @@ def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
 @click.option('--log-level', default='INFO', help='Logging level')
 def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_dir: str,
          shift_hours: float, target_trips: int, buffer_minutes: int,
+         default_trip_duration: float,
          start_waypoint: str, end_waypoint: str, waypoint_matching: str,
          parallel: bool, max_workers: int, log_level: str):
     """
@@ -128,6 +131,9 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
         
         # Analyze specific time period
         --start-date "2025-06-17 06:00:00" --end-date "2025-06-17 18:00:00"
+        
+        # Use custom default trip duration
+        --default-trip-duration 60  # 60 minutes default
     """
     # Set up logging
     setup_logging(log_level)
@@ -135,6 +141,7 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
     logger.info("Starting Fleet Shift Analysis")
     logger.info(f"Fleet ID: {fleet_id}")
     logger.info(f"Date Range: {start_date} to {end_date} ({timezone})")
+    logger.info(f"Default Trip Duration: {default_trip_duration} minutes")
     
     # Validate timezone
     try:
@@ -170,11 +177,12 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
         logger.info(f"  Start: {start_datetime_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         logger.info(f"  End: {end_datetime_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         
-        # Initialize configurations with timezone
+        # Initialize configurations with timezone and default trip duration
         shift_config = ShiftConfig(
             shift_duration_hours=shift_hours,
             target_trips=target_trips,
             buffer_time_minutes=buffer_minutes,
+            default_trip_duration_minutes=default_trip_duration,
             start_waypoint=start_waypoint,
             end_waypoint=end_waypoint,
             waypoint_matching=waypoint_matching,

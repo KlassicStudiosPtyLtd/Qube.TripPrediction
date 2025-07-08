@@ -14,6 +14,7 @@
                 "--output-dir", "./output/port_berth_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
+                "--default-trip-duration", "45",
                 "--start-waypoint", "Port Berth_PHEVG250606",
                 "--end-waypoint", "Port Berth_PHEVG250606",
                 "--waypoint-matching", "exact",
@@ -26,8 +27,8 @@
             },
             "cwd": "${workspaceFolder}"
         },
-         {
-            "name": "Fleet Analyzer - Single Shift - Perth Time",
+        {
+            "name": "Fleet Analyzer - Single Shift - Long Trips",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
@@ -36,12 +37,36 @@
                 "--start-date", "2025-06-17 06:00:00",
                 "--end-date", "2025-06-17 18:00:00",
                 "--timezone", "Australia/Perth",
-                "--output-dir", "./output/port_berth_analysis",
+                "--output-dir", "./output/long_trips_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
+                "--default-trip-duration", "60",
                 "--start-waypoint", "Port Berth_PHEVG250606",
                 "--end-waypoint", "Port Berth_PHEVG250606",
                 "--waypoint-matching", "exact",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Fleet Analyzer - Short Trips",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-06-17",
+                "--end-date", "2025-06-17",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./output/short_trips_analysis",
+                "--shift-hours", "12",
+                "--target-trips", "6",
+                "--default-trip-duration", "30",
                 "--log-level", "INFO"
             ],
             "console": "integratedTerminal",
@@ -64,6 +89,7 @@
                 "--output-dir", "./output/sydney_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
+                "--default-trip-duration", "45",
                 "--start-waypoint", "Port Berth_PHEVG250606",
                 "--end-waypoint", "Port Berth_PHEVG250606",
                 "--waypoint-matching", "exact",
@@ -89,6 +115,7 @@
                 "--output-dir", "./output/us_eastern_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
+                "--default-trip-duration", "45",
                 "--log-level", "INFO"
             ],
             "console": "integratedTerminal",
@@ -111,6 +138,7 @@
                 "--output-dir", "./output/utc_analysis",
                 "--shift-hours", "12",
                 "--target-trips", "4",
+                "--default-trip-duration", "45",
                 "--log-level", "INFO"
             ],
             "console": "integratedTerminal",

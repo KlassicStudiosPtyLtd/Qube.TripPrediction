@@ -48,8 +48,8 @@ class TripPredictor:
             base_duration = np.mean([t.duration_minutes for t in shift.trips])
             confidence = 0.8
         else:
-            # Default estimate
-            base_duration = 45.0  # Default 45 minutes
+            # Use configurable default estimate
+            base_duration = self.config.default_trip_duration_minutes
             confidence = 0.5
         
         # Apply modifiers
@@ -112,7 +112,8 @@ class TripPredictor:
             'shift_progress_ratio': shift_progress_ratio,
             'avg_trip_duration': avg_duration,
             'duration_variance': duration_variance,
-            'fatigue_factor': self._calculate_fatigue_factor(trips_completed)
+            'fatigue_factor': self._calculate_fatigue_factor(trips_completed),
+            'default_duration_used': avg_duration == 0  # Track if using default
         }
     
     def _apply_prediction_modifiers(self, base_duration: float,
