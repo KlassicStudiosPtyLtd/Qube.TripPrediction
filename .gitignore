@@ -54,3 +54,8 @@ htmlcov/
 
 #allow launch.json to be tracked
 .vscode/launch.json
+
+#simulation cache
+simulation_cache/
+#simulation results
+simulation_results/

@@ -76,17 +76,18 @@
             },
             "cwd": "${workspaceFolder}"
         },
-        {
-            "name": "Fleet Analyzer - Sydney Time",
+{
+            "name": "Run Simulation - Full Week",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/main.py",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
             "args": [
                 "--fleet-id", "104002",
-                "--start-date", "2025-06-17",
+                "--start-date", "2025-06-10",
                 "--end-date", "2025-06-17",
-                "--timezone", "Australia/Sydney",
-                "--output-dir", "./output/sydney_analysis",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "1.0",
+                "--output-dir", "./simulation_results/week_simulation",
                 "--shift-hours", "12",
                 "--target-trips", "4",
                 "--default-trip-duration", "45",
@@ -103,16 +104,44 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Fleet Analyzer - US Eastern Time",
+            "name": "Run Simulation - Single Day Shift High Frequency",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/main.py",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
             "args": [
                 "--fleet-id", "104002",
-                "--start-date", "2025-06-17",
-                "--end-date", "2025-06-17",
-                "--timezone", "US/Eastern",
-                "--output-dir", "./output/us_eastern_analysis",
+                "--start-date", "2025-06-17 06:00:00",
+                "--end-date", "2025-06-17 18:00:00",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "0.5",
+                "--output-dir", "./simulation_results/day_simulation_30min",
+                "--shift-hours", "12",
+                "--target-trips", "4",
+                "--cache-dir", "./simulation_cache",
+                "--default-trip-duration", "60",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Run Simulation - Specific Vehicles",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-06-15",
+                "--end-date", "2025-06-16",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "1.0",
+                "--vehicles", "12345",
+                "--vehicles", "67890",
+                "--output-dir", "./simulation_results/specific_vehicles",
                 "--shift-hours", "12",
                 "--target-trips", "4",
                 "--default-trip-duration", "45",
@@ -126,33 +155,15 @@
             "cwd": "${workspaceFolder}"
         },
         {
-            "name": "Fleet Analyzer - UTC (Default)",
+            "name": "Generate Simulation Charts",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/main.py",
+            "program": "${workspaceFolder}/simulation/generate_charts.py",
             "args": [
-                "--fleet-id", "104002",
-                "--start-date", "2025-06-17",
-                "--end-date", "2025-06-17",
-                "--timezone", "UTC",
-                "--output-dir", "./output/utc_analysis",
-                "--shift-hours", "12",
-                "--target-trips", "4",
-                "--default-trip-duration", "45",
-                "--log-level", "INFO"
+                "--simulation-id", "sim_20250617_143022",
+                "--results-dir", "./simulation_results/week_simulation",
+                "--timezone", "Australia/Perth"
             ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            },
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "Python: Current File",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
