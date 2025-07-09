@@ -245,14 +245,14 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
     print(f"Active Alerts: {summary.get('total_alerts', 0)}")
     
     # Print detailed shift analysis table
-    print(f"\n{'='*150}")
+    print(f"\n{'='*170}")
     print("SHIFT ANALYSIS DETAILS")
-    print(f"{'='*150}")
+    print(f"{'='*170}")
     
-    # Define column widths
+    # Define column widths - adjusted for Vehicle Name + Ref
     col_widths = {
         'Shift Date': 12,
-        'Vehicle Name': 15,
+        'Vehicle (Ref)': 25,
         'Driver ID': 12,
         'Shift Start': 20,
         'Shift End': 20,
@@ -267,7 +267,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
     # Print header
     header = (
         f"{'Shift Date':<{col_widths['Shift Date']}} | "
-        f"{'Vehicle Name':<{col_widths['Vehicle Name']}} | "
+        f"{'Vehicle (Ref)':<{col_widths['Vehicle (Ref)']}} | "
         f"{'Driver ID':<{col_widths['Driver ID']}} | "
         f"{'Shift Start':<{col_widths['Shift Start']}} | "
         f"{'Shift End':<{col_widths['Shift End']}} | "
@@ -279,7 +279,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
         f"{'Recommendation':<{col_widths['Recommendation']}}"
     )
     print(header)
-    print("-" * 150)
+    print("-" * 170)
     
     # Collect all shifts from all vehicles
     vehicle_analyses = fleet_summary.get('vehicle_analyses', {})
@@ -289,6 +289,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
     
     for vehicle_id, analysis in sorted_vehicles:
         vehicle_name = analysis.get('vehicle_name', f'Vehicle_{vehicle_id}')
+        vehicle_ref = analysis.get('vehicle_ref', 'Unknown')
         
         # Get all trips for this vehicle
         all_trips = analysis.get('trips', [])
@@ -298,9 +299,9 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
             continue
         
         # Print vehicle header
-        print(f"\n{'='*150}")
-        print(f"VEHICLE: {vehicle_name} (ID: {vehicle_id})")
-        print(f"{'='*150}")
+        print(f"\n{'='*170}")
+        print(f"VEHICLE: {vehicle_name} (ID: {vehicle_id}, Ref: {vehicle_ref})")
+        print(f"{'='*170}")
         
         for shift in analysis.get('shift_analyses', []):
             shift_info = shift.get('shift', {})
@@ -325,8 +326,11 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
             alert_required = 'Yes' if shift.get('alert_required', False) else 'No'
             recommendation = shift.get('recommendation', '')
             
+            # Create vehicle display with ref
+            vehicle_display = f"{vehicle_name} ({vehicle_ref})"
+            
             # Truncate long values to fit column widths
-            vehicle_name_display = vehicle_name[:col_widths['Vehicle Name']-1] + '.' if len(vehicle_name) > col_widths['Vehicle Name'] else vehicle_name
+            vehicle_display_truncated = vehicle_display[:col_widths['Vehicle (Ref)']-1] + '.' if len(vehicle_display) > col_widths['Vehicle (Ref)'] else vehicle_display
             driver_id_display = driver_id[:col_widths['Driver ID']-1] + '.' if len(driver_id) > col_widths['Driver ID'] else driver_id
             recommendation_display = recommendation[:col_widths['Recommendation']-1] + '.' if len(recommendation) > col_widths['Recommendation'] else recommendation
             
@@ -344,7 +348,7 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
             # Print shift row
             row = (
                 f"{shift_date:<{col_widths['Shift Date']}} | "
-                f"{vehicle_name_display:<{col_widths['Vehicle Name']}} | "
+                f"{vehicle_display_truncated:<{col_widths['Vehicle (Ref)']}} | "
                 f"{driver_id_display:<{col_widths['Driver ID']}} | "
                 f"{shift_start:<{col_widths['Shift Start']}} | "
                 f"{shift_end:<{col_widths['Shift End']}} | "
@@ -407,9 +411,9 @@ def print_analysis_summary(fleet_summary: Dict[str, Any],
                 print("  No trips completed in this shift\n")
     
     # Print summary statistics at the bottom
-    print(f"\n{'='*150}")
+    print(f"\n{'='*170}")
     print("SUMMARY STATISTICS")
-    print(f"{'='*150}")
+    print(f"{'='*170}")
     
     # Calculate fleet-wide trip statistics
     total_trips = 0

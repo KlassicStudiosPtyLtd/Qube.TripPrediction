@@ -191,6 +191,11 @@ class FleetAnalyzer:
             if not history_data:
                 return None
             
+            # Extract vehicleRef from first history record if available
+            vehicle_ref = None
+            if history_data.get('history') and len(history_data['history']) > 0:
+                vehicle_ref = history_data['history'][0].get('vehicleRef', 'Unknown')
+            
             # Extract trips (they'll be in UTC)
             trips = self.trip_extractor.extract_trips(history_data)
             
@@ -204,6 +209,7 @@ class FleetAnalyzer:
             analysis = {
                 'vehicle_id': vehicle_id,
                 'vehicle_name': vehicle_name,
+                'vehicle_ref': vehicle_ref,  # Add vehicleRef
                 'total_trips': len(trips),
                 'shift_analyses': [sa.to_dict() for sa in shift_analyses],
                 'trips': [trip.to_dict() for trip in trips],

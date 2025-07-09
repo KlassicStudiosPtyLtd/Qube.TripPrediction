@@ -29,6 +29,8 @@ class SimulationPoint:
     """Represents a single point in the simulation timeline."""
     timestamp: datetime
     vehicle_id: int
+    vehicle_name: str
+    vehicle_ref: str
     shift_id: str
     trips_completed: int
     trips_predicted: int
@@ -59,6 +61,7 @@ class SimulationResult:
     simulation_points: List[SimulationPoint]
     summary_by_vehicle: Dict[int, Dict[str, Any]]
     alert_timeline: List[Dict[str, Any]]
+    vehicle_info: Dict[int, Dict[str, str]] = field(default_factory=dict)  # Store vehicle names and refs
     
 
 class SimulationEngine:
@@ -89,6 +92,7 @@ class SimulationEngine:
         # Storage
         self.simulation_points = []
         self.alert_history = []
+        self.vehicle_info = {}  # Store vehicle names and refs
         
         # Create cache directory if specified
         if self.cache_dir:
@@ -162,6 +166,13 @@ class SimulationEngine:
             logger.error("No vehicles found for simulation")
             return self._create_empty_result(start_date, end_date, timezone)
         
+        # Store vehicle info
+        for vehicle in vehicles:
+            self.vehicle_info[vehicle['id']] = {
+                'name': vehicle.get('displayName', f'Vehicle_{vehicle["id"]}'),
+                'ref': 'Unknown'  # Will be updated when we get history
+            }
+        
         logger.info(f"Simulating {len(vehicles)} vehicles")
         
         # Get all historical data for the period (with buffer for context)
@@ -211,6 +222,10 @@ class SimulationEngine:
         alerts = []
         
         for vehicle_id, full_history in all_vehicle_data.items():
+            # Get vehicle info
+            vehicle_name = self.vehicle_info.get(vehicle_id, {}).get('name', f'Vehicle_{vehicle_id}')
+            vehicle_ref = self.vehicle_info.get(vehicle_id, {}).get('ref', 'Unknown')
+            
             # Filter data to only what would be available at simulation_time
             available_data = []
             for event in full_history:
@@ -257,7 +272,7 @@ class SimulationEngine:
             
             # Analyze shifts with data up to simulation_time
             shift_analyses = self.shift_analyzer.analyze_shifts(
-                vehicle_id, f"Vehicle_{vehicle_id}", trips, timezone,
+                vehicle_id, vehicle_name, trips, timezone,
                 analysis_end_time=simulation_time
             )
             
@@ -269,14 +284,16 @@ class SimulationEngine:
                 if shift.start_time <= simulation_time <= shift.end_time:
                     # Create simulation point
                     point = self._create_simulation_point(
-                        simulation_time, vehicle_id, shift, shift_analysis
+                        simulation_time, vehicle_id, vehicle_name, vehicle_ref, 
+                        shift, shift_analysis
                     )
                     points.append(point)
                     
                     # Check for alerts
                     if shift_analysis.alert_required:
                         alert = self._create_simulation_alert(
-                            simulation_time, vehicle_id, shift_analysis
+                            simulation_time, vehicle_id, vehicle_name, vehicle_ref,
+                            shift_analysis
                         )
                         alerts.append(alert)
         
@@ -286,6 +303,7 @@ class SimulationEngine:
         }
     
     def _create_simulation_point(self, timestamp: datetime, vehicle_id: int,
+                                vehicle_name: str, vehicle_ref: str,
                                 shift: Any, shift_analysis: Any) -> SimulationPoint:
         """Create a simulation point from shift analysis."""
         metrics = shift_analysis.metrics
@@ -293,6 +311,8 @@ class SimulationEngine:
         return SimulationPoint(
             timestamp=timestamp,
             vehicle_id=vehicle_id,
+            vehicle_name=vehicle_name,
+            vehicle_ref=vehicle_ref,
             shift_id=shift.shift_id,
             trips_completed=metrics.get('trips_completed', 0),
             trips_predicted=metrics.get('trips_target', 0),
@@ -310,11 +330,14 @@ class SimulationEngine:
         )
     
     def _create_simulation_alert(self, timestamp: datetime, vehicle_id: int,
+                                vehicle_name: str, vehicle_ref: str,
                                 shift_analysis: Any) -> Dict[str, Any]:
         """Create alert record for simulation."""
         return {
             'timestamp': timestamp.isoformat(),
             'vehicle_id': vehicle_id,
+            'vehicle_name': vehicle_name,
+            'vehicle_ref': vehicle_ref,
             'shift_id': shift_analysis.shift.shift_id,
             'alert_type': shift_analysis.risk_level,
             'message': shift_analysis.recommendation,
@@ -399,7 +422,8 @@ class SimulationEngine:
             f1_score=f1_score,
             simulation_points=simulation_points,
             summary_by_vehicle=vehicle_summaries,
-            alert_timeline=alert_timeline
+            alert_timeline=alert_timeline,
+            vehicle_info=self.vehicle_info
         )
     
     def _create_vehicle_summaries(self, simulation_points: List[SimulationPoint],
@@ -424,6 +448,8 @@ class SimulationEngine:
             alerts = vehicle_alerts[vehicle_id]
             
             summaries[vehicle_id] = {
+                'vehicle_name': self.vehicle_info.get(vehicle_id, {}).get('name', f'Vehicle_{vehicle_id}'),
+                'vehicle_ref': self.vehicle_info.get(vehicle_id, {}).get('ref', 'Unknown'),
                 'total_shifts': len(set(p.shift_id for p in points)),
                 'total_alerts': len(alerts),
                 'alert_types': dict(pd.Series([a['alert_type'] for a in alerts]).value_counts()),
@@ -481,6 +507,12 @@ class SimulationEngine:
                         cache_file = self._get_cache_filename(fleet_id, vehicle_id, start_date, end_date)
                         self._save_to_cache(cache_file, history)
                 
+                # Extract vehicleRef from first history record if available
+                if history and len(history) > 0:
+                    vehicle_ref = history[0].get('vehicleRef', 'Unknown')
+                    if vehicle_id in self.vehicle_info:
+                        self.vehicle_info[vehicle_id]['ref'] = vehicle_ref
+                
                 all_data[vehicle_id] = history if history else []
                 
             except Exception as e:
@@ -509,7 +541,8 @@ class SimulationEngine:
             f1_score=0,
             simulation_points=[],
             summary_by_vehicle={},
-            alert_timeline=[]
+            alert_timeline=[],
+            vehicle_info={}
         )
     
     def save_simulation_results(self, result: SimulationResult, output_dir: Path):
@@ -537,7 +570,8 @@ class SimulationEngine:
                 }
             },
             'summary_by_vehicle': result.summary_by_vehicle,
-            'alert_timeline': result.alert_timeline
+            'alert_timeline': result.alert_timeline,
+            'vehicle_info': result.vehicle_info
         }
         
         with open(output_dir / f'{result.simulation_id}_results.json', 'w') as f:
@@ -549,6 +583,8 @@ class SimulationEngine:
             points_data.append({
                 'timestamp': point.timestamp.isoformat(),
                 'vehicle_id': point.vehicle_id,
+                'vehicle_name': point.vehicle_name,
+                'vehicle_ref': point.vehicle_ref,
                 'shift_id': point.shift_id,
                 'trips_completed': point.trips_completed,
                 'trips_predicted': point.trips_predicted,

@@ -238,6 +238,7 @@ class DashboardGenerator:
         
         for vehicle_id, analysis in vehicle_analyses.items():
             vehicle_name = analysis.get('vehicle_name', f'Vehicle_{vehicle_id}')
+            vehicle_ref = analysis.get('vehicle_ref', 'Unknown')
             
             for shift_analysis in analysis.get('shift_analyses', []):
                 shift = shift_analysis.get('shift', {})
@@ -260,6 +261,7 @@ class DashboardGenerator:
                 all_shifts.append({
                     'date': shift_date,
                     'vehicle_name': vehicle_name,
+                    'vehicle_ref': vehicle_ref,
                     'driver_id': shift.get('driver_id', 'Unknown'),
                     'shift_times': shift_times,
                     'trips_completed': metrics.get('trips_completed', 0),
@@ -286,7 +288,7 @@ class DashboardGenerator:
             rows += f"""
             <tr class="{risk_class}">
                 <td>{shift['date']}</td>
-                <td>{shift['vehicle_name']}</td>
+                <td>{shift['vehicle_name']} ({shift['vehicle_ref']})</td>
                 <td>{shift['driver_id']}</td>
                 <td>{shift['shift_times']}</td>
                 <td>{shift['trips_completed']}/{shift['trips_target']}</td>
@@ -304,7 +306,7 @@ class DashboardGenerator:
         <table>
             <tr>
                 <th>Date</th>
-                <th>Vehicle</th>
+                <th>Vehicle (Ref)</th>
                 <th>Driver</th>
                 <th>Shift Times</th>
                 <th>Trips</th>

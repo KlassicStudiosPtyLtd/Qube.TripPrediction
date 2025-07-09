@@ -149,7 +149,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
 
 
 def print_simulation_summary(result, output_path: Path):
-    """Print simulation results summary."""
+    """Print simulation results summary with vehicle display names and refs."""
     print(f"\n{'='*60}")
     print("SIMULATION RESULTS SUMMARY")
     print(f"{'='*60}")
@@ -173,14 +173,23 @@ def print_simulation_summary(result, output_path: Path):
     print(f"False Negatives: {result.false_negatives:4d} (missed problems)")
     
     if result.summary_by_vehicle:
-        print(f"\n{'VEHICLE SUMMARY':^60}")
-        print(f"{'-'*60}")
-        print(f"{'Vehicle ID':<12} {'Shifts':<8} {'Alerts':<8} {'Alert Types':<30}")
-        print(f"{'-'*60}")
+        print(f"\n{'VEHICLE SUMMARY':^80}")
+        print(f"{'-'*80}")
+        print(f"{'Vehicle Name (Ref)':<30} {'Shifts':<8} {'Alerts':<8} {'Alert Types':<30}")
+        print(f"{'-'*80}")
         
         for vehicle_id, summary in sorted(result.summary_by_vehicle.items()):
+            # Get vehicle name and ref from summary
+            vehicle_name = summary.get('vehicle_name', f'Vehicle_{vehicle_id}')
+            vehicle_ref = summary.get('vehicle_ref', 'Unknown')
+            vehicle_display = f"{vehicle_name} ({vehicle_ref})"
+            
+            # Truncate if too long
+            if len(vehicle_display) > 29:
+                vehicle_display = vehicle_display[:28] + '.'
+            
             alert_types = ', '.join([f"{k}:{v}" for k, v in summary['alert_types'].items()])
-            print(f"{vehicle_id:<12} {summary['total_shifts']:<8} "
+            print(f"{vehicle_display:<30} {summary['total_shifts']:<8} "
                   f"{summary['total_alerts']:<8} {alert_types:<30}")
     
     # Show sample alerts
@@ -192,7 +201,12 @@ def print_simulation_summary(result, output_path: Path):
             timestamp = datetime.fromisoformat(alert['timestamp'].replace('Z', '+00:00'))
             local_time = timestamp.astimezone(pytz.timezone(result.timezone))
             
-            print(f"\n{i+1}. {local_time.strftime('%Y-%m-%d %H:%M:%S')} - Vehicle {alert['vehicle_id']}")
+            # Get vehicle display info from alert
+            vehicle_name = alert.get('vehicle_name', f"Vehicle {alert['vehicle_id']}")
+            vehicle_ref = alert.get('vehicle_ref', 'Unknown')
+            vehicle_display = f"{vehicle_name} ({vehicle_ref})"
+            
+            print(f"\n{i+1}. {local_time.strftime('%Y-%m-%d %H:%M:%S')} - {vehicle_display}")
             print(f"   Type: {alert['alert_type'].upper()}")
             print(f"   Message: {alert['message']}")
             print(f"   Metrics: Trips {alert['metrics'].get('trips_completed')}/{alert['metrics'].get('trips_target')}")
