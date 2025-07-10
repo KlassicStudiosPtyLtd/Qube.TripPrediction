@@ -303,15 +303,86 @@ class FleetAnalyzer:
         )
     
     def _save_results(self, fleet_summary: Dict[str, Any], output_path: Path):
-        """Save analysis results."""
-        # Save complete analysis
+        """Save analysis results with detailed algorithm explanations."""
+        # Save complete analysis (includes algorithm details in shift analyses)
         with open(output_path / 'fleet_analysis.json', 'w', encoding='utf-8') as f:
             json.dump(fleet_summary, f, indent=2, default=str, ensure_ascii=False)
         
-        # Save alerts separately
+        # Save alerts separately with full details
         if self.alerts:
+            alerts_data = [alert.to_dict() for alert in self.alerts]
             with open(output_path / 'alerts.json', 'w', encoding='utf-8') as f:
-                json.dump([alert.to_dict() for alert in self.alerts], f, indent=2, default=str, ensure_ascii=False)
+                json.dump(alerts_data, f, indent=2, default=str, ensure_ascii=False)
+            
+            # Also save alerts to CSV with algorithm details
+            alerts_for_csv = []
+            for alert in self.alerts:
+                alert_dict = alert.to_dict()
+                details = alert_dict.get('details', {})
+                
+                alerts_for_csv.append({
+                    'timestamp': alert_dict['timestamp'],
+                    'alert_id': alert_dict['alert_id'],
+                    'vehicle_id': alert_dict['vehicle_id'],
+                    'vehicle_name': alert_dict['vehicle_name'],
+                    'driver_id': alert_dict['driver_id'],
+                    'shift_date': alert_dict['shift_date'],
+                    'severity': alert_dict['severity'],
+                    'message': alert_dict['message'],
+                    'trips_completed': details.get('trips_completed', 0),
+                    'trips_target': details.get('trips_target', 0),
+                    'trips_remaining': details.get('trips_remaining', 0),
+                    'remaining_time_minutes': details.get('remaining_time_minutes', 0),
+                    'estimated_time_needed_minutes': details.get('estimated_time_needed_minutes', 0),
+                    'time_into_shift_hours': details.get('time_into_shift_hours', 0),
+                    'completion_probability': details.get('completion_probability', 0),
+                    'average_trip_duration': details.get('average_trip_duration', 0),
+                    'algorithm_details': details.get('algorithm_details', '')  # Full explanation
+                })
+            
+            # Save detailed CSV
+            import pandas as pd
+            alerts_df = pd.DataFrame(alerts_for_csv)
+            alerts_df.to_csv(output_path / 'alerts_detailed.csv', index=False, encoding='utf-8')
+            
+            # Save summary CSV without long algorithm details
+            alerts_summary = alerts_df.drop(columns=['algorithm_details'])
+            alerts_summary.to_csv(output_path / 'alerts_summary.csv', index=False, encoding='utf-8')
+            
+            logger.info(f"Saved {len(self.alerts)} alerts to CSV files")
+        
+        # Save shift analysis summary to CSV
+        shift_summary_data = []
+        for vehicle_id, analysis in fleet_summary.get('vehicle_analyses', {}).items():
+            for shift_analysis in analysis.get('shift_analyses', []):
+                shift = shift_analysis.get('shift', {})
+                metrics = shift_analysis.get('metrics', {})
+                
+                shift_summary_data.append({
+                    'vehicle_id': vehicle_id,
+                    'vehicle_name': analysis.get('vehicle_name', ''),
+                    'vehicle_ref': analysis.get('vehicle_ref', ''),
+                    'shift_id': shift.get('shift_id', ''),
+                    'shift_start': shift.get('start_time', ''),
+                    'shift_end': shift.get('end_time', ''),
+                    'duration_hours': shift.get('duration_hours', 0),
+                    'trips_completed': metrics.get('trips_completed', 0),
+                    'trips_target': metrics.get('trips_target', 0),
+                    'can_complete_target': shift_analysis.get('can_complete_target', False),
+                    'risk_level': shift_analysis.get('risk_level', ''),
+                    'alert_required': shift_analysis.get('alert_required', False),
+                    'avg_trip_duration': metrics.get('avg_trip_duration', 0),
+                    'remaining_time': metrics.get('remaining_time', 0),
+                    'estimated_time_needed': metrics.get('total_estimated_time', 0),
+                    'completion_probability': metrics.get('completion_probability', 0),
+                    'recommendation_summary': shift_analysis.get('recommendation', '').split('\n')[0]  # First line only
+                })
+        
+        if shift_summary_data:
+            import pandas as pd
+            shifts_df = pd.DataFrame(shift_summary_data)
+            shifts_df.to_csv(output_path / 'shift_analysis_summary.csv', index=False, encoding='utf-8')
+            logger.info(f"Saved {len(shift_summary_data)} shift analyses to CSV")
     
     def _save_vehicle_analysis(self, vehicle_id: int, vehicle_name: str,
                              analysis: Dict[str, Any], output_path: Path):

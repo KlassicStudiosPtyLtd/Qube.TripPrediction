@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def print_time_period_alerts(current_time: datetime, alerts: list, timezone: str):
-    """Print alerts generated during the current time period."""
+    """Print alerts generated during the current time period with detailed algorithm explanations."""
     if not alerts:
         print(f"\n⏰ {current_time.astimezone(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print("   ✅ No alerts generated this period")
@@ -41,7 +41,7 @@ def print_time_period_alerts(current_time: datetime, alerts: list, timezone: str
             color = '\033[94m'  # Blue
         reset = '\033[0m'
         
-        print(f"   {i}. {color}[{risk_level}]{reset} {vehicle_name} ({vehicle_ref})")
+        print(f"\n   {i}. {color}[{risk_level}]{reset} {vehicle_name} ({vehicle_ref})")
         print(f"      → {alert.get('message', 'No message')}")
         
         # Show trip progress
@@ -49,12 +49,33 @@ def print_time_period_alerts(current_time: datetime, alerts: list, timezone: str
         trips_completed = metrics.get('trips_completed', 0)
         trips_target = metrics.get('trips_target', 0)
         print(f"      → Progress: {trips_completed}/{trips_target} trips completed")
+        
+        # Show detailed algorithm explanation if in verbose mode
+        if alert.get('algorithm_details'):
+            print(f"\n      📊 ALGORITHM DETAILS:")
+            # Indent each line of the algorithm details
+            for line in alert['algorithm_details'].split('\n'):
+                if line.strip():
+                    print(f"         {line}")
+        
+        # Show key metrics
+        print(f"\n      ⏱️  KEY METRICS:")
+        print(f"         • Time into shift: {metrics.get('time_into_shift_hours', 0):.1f} hours")
+        print(f"         • Remaining time: {metrics.get('remaining_time', 0):.0f} minutes")
+        print(f"         • Estimated time needed: {metrics.get('total_estimated_time', 0):.0f} minutes")
+        print(f"         • Completion probability: {metrics.get('completion_probability', 0):.1%}")
+        
+        print(f"      {'─' * 60}")
 
 
 def wait_for_user_input():
-    """Wait for user to press Enter to continue."""
+    """Wait for user to press Enter to continue or 'd' for detailed view."""
     try:
-        input("\n   Press Enter to continue simulation...")
+        response = input("\n   Press Enter to continue simulation (or 'd' for more details)...")
+        if response.lower() == 'd':
+            print("\n   Detailed mode activated for next period.")
+            return 'detailed'
+        return 'continue'
     except KeyboardInterrupt:
         print("\n\nSimulation interrupted by user.")
         raise

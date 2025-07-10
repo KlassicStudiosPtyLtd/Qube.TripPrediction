@@ -1,6 +1,6 @@
 """
 Shift analysis logic with timezone support and fixed shift boundaries.
-Updated to use 6am-6pm and 6pm-6am shifts.
+Enhanced with detailed algorithmic explanations in recommendations.
 """
 import logging
 from datetime import datetime, timedelta
@@ -181,7 +181,10 @@ class ShiftAnalyzer:
                 can_complete_target=True,
                 risk_level='none',
                 alert_required=False,
-                recommendation='Target achieved',
+                recommendation=self._generate_detailed_recommendation(
+                    trips_completed, trips_remaining, 0, 0, 0,
+                    True, 'none', time_into_shift, shift, []
+                ),
                 metrics={
                     'trips_completed': trips_completed,
                     'trips_target': self.config.target_trips,
@@ -192,19 +195,25 @@ class ShiftAnalyzer:
         
         # For new shifts with no trips, use more appropriate messaging
         if trips_completed == 0 and time_into_shift < 2.0:  # Less than 2 hours into shift
+            remaining_time = (shift.end_time - current_time).total_seconds() / 60
+            
             return ShiftAnalysis(
                 shift=shift,
                 predictions=[],
                 can_complete_target=True,
                 risk_level='low',
                 alert_required=False,
-                recommendation=f'Shift just started. Plan to complete {self.config.target_trips} trips.',
+                recommendation=self._generate_detailed_recommendation(
+                    trips_completed, trips_remaining, remaining_time, 0, 0,
+                    True, 'low', time_into_shift, shift, []
+                ),
                 metrics={
                     'trips_completed': 0,
                     'trips_target': self.config.target_trips,
                     'completion_rate': 0.0,
                     'time_into_shift_hours': time_into_shift,
-                    'shift_duration_hours': shift.duration_hours
+                    'shift_duration_hours': shift.duration_hours,
+                    'remaining_time': remaining_time
                 }
             )
         
@@ -242,9 +251,11 @@ class ShiftAnalyzer:
             total_estimated_time, buffer_adjusted_time, time_into_shift
         )
         
-        # Generate recommendation
-        recommendation = self._generate_recommendation(
-            trips_remaining, can_complete, risk_level, time_into_shift
+        # Generate detailed recommendation
+        recommendation = self._generate_detailed_recommendation(
+            trips_completed, trips_remaining, remaining_time, 
+            total_estimated_time, buffer_adjusted_time,
+            can_complete, risk_level, time_into_shift, shift, predictions
         )
         
         return ShiftAnalysis(
@@ -300,9 +311,147 @@ class ShiftAnalyzer:
         else:
             return 'critical'
     
+    def _generate_detailed_recommendation(self, trips_completed: int, trips_remaining: int,
+                                        remaining_time: float, total_estimated_time: float,
+                                        buffer_adjusted_time: float, can_complete: bool,
+                                        risk_level: str, time_into_shift: float,
+                                        shift: Shift, predictions: List[TripPrediction]) -> str:
+        """Generate detailed recommendation with algorithmic explanation."""
+        
+        # Format time values
+        remaining_hours = remaining_time / 60
+        buffer_hours = self.config.buffer_time_minutes / 60
+        
+        # Early shift - special handling
+        if time_into_shift < 2.0 and trips_completed == 0:
+            return (f"SHIFT START - Algorithm Status:\n"
+                    f"• Time into shift: {time_into_shift:.1f} hours\n"
+                    f"• Remaining shift time: {remaining_hours:.1f} hours\n"
+                    f"• Target: {self.config.target_trips} trips\n"
+                    f"• Default trip duration: {self.config.default_trip_duration_minutes} min\n"
+                    f"• Estimated total time needed: {self.config.target_trips * self.config.default_trip_duration_minutes} min\n"
+                    f"• Recommendation: Begin first trip when ready.")
+        
+        # Target achieved
+        if trips_remaining == 0:
+            return (f"TARGET ACHIEVED - Algorithm Status:\n"
+                    f"• Completed: {trips_completed}/{self.config.target_trips} trips\n"
+                    f"• Time used: {shift.duration_hours - (remaining_hours):.1f} hours\n"
+                    f"• Average trip duration: {np.mean([t.duration_minutes for t in shift.trips]):.1f} min\n"
+                    f"• Recommendation: Target met. Additional trips optional.")
+        
+        # Build detailed algorithm explanation
+        calculation_details = []
+        
+        # Historical data section
+        if shift.trips:
+            avg_duration = np.mean([t.duration_minutes for t in shift.trips])
+            std_duration = np.std([t.duration_minutes for t in shift.trips]) if len(shift.trips) > 1 else 0
+            calculation_details.append(
+                f"HISTORICAL DATA:\n"
+                f"• Trips completed: {trips_completed}\n"
+                f"• Average duration: {avg_duration:.1f} min\n"
+                f"• Standard deviation: {std_duration:.1f} min"
+            )
+        else:
+            calculation_details.append(
+                f"HISTORICAL DATA:\n"
+                f"• No trips completed yet\n"
+                f"• Using default duration: {self.config.default_trip_duration_minutes} min"
+            )
+        
+        # Time calculations
+        calculation_details.append(
+            f"\nTIME CALCULATIONS:\n"
+            f"• Current time into shift: {time_into_shift:.1f} hours\n"
+            f"• Remaining shift time: {remaining_hours:.1f} hours ({remaining_time:.0f} min)\n"
+            f"• Buffer time: {buffer_hours:.1f} hours ({self.config.buffer_time_minutes} min)\n"
+            f"• Effective time available: {buffer_adjusted_time:.0f} min"
+        )
+        
+        # Trip predictions
+        if predictions:
+            pred_details = "\nTRIP PREDICTIONS:"
+            for i, pred in enumerate(predictions):
+                trip_num = trips_completed + i + 1
+                factors = pred.factors
+                
+                # Build factors string
+                factor_strs = []
+                if factors.get('is_peak_hour'):
+                    factor_strs.append("peak hour +15%")
+                if factors.get('fatigue_factor', 1.0) > 1.0:
+                    fatigue_pct = (factors['fatigue_factor'] - 1.0) * 100
+                    factor_strs.append(f"fatigue +{fatigue_pct:.0f}%")
+                if factors.get('duration_variance', 0) > 0:
+                    factor_strs.append(f"variance +{factors['duration_variance']:.1f} min")
+                
+                factors_str = f" ({', '.join(factor_strs)})" if factor_strs else ""
+                
+                pred_details += f"\n• Trip {trip_num}: {pred.estimated_duration_minutes:.1f} min{factors_str}"
+            
+            calculation_details.append(pred_details)
+            calculation_details.append(
+                f"\n• Total estimated time: {total_estimated_time:.0f} min"
+                f"\n• Time utilization: {(total_estimated_time / buffer_adjusted_time * 100):.1f}%" if buffer_adjusted_time > 0 else ""
+            )
+        
+        # Risk assessment
+        risk_explanation = self._get_risk_explanation(total_estimated_time, buffer_adjusted_time, time_into_shift)
+        calculation_details.append(f"\nRISK ASSESSMENT:\n{risk_explanation}")
+        
+        # Final recommendation
+        if can_complete and risk_level == 'low':
+            action = f"Continue with all {trips_remaining} remaining trips. Ample time available."
+        elif can_complete and risk_level == 'medium':
+            action = f"Continue with {trips_remaining} trips but maintain steady pace. Monitor progress."
+        elif risk_level == 'high':
+            if trips_remaining == 1:
+                action = "DO NOT START final trip. High risk of exceeding shift duration."
+            else:
+                safe_trips = max(0, trips_remaining - 1)
+                action = f"HIGH RISK: Complete only {safe_trips} more trips. Skip final trip."
+        else:  # critical
+            safe_trips = max(0, trips_remaining - 2) if trips_remaining > 2 else 0
+            action = f"CRITICAL: Complete maximum {safe_trips} trips. Multiple trips at risk."
+        
+        calculation_details.append(f"\nRECOMMENDATION: {action}")
+        
+        # Add fatigue warning if applicable
+        if predictions and any(p.factors.get('fatigue_factor', 1.0) > 1.1 for p in predictions):
+            calculation_details.append(
+                f"\n⚠️ FATIGUE WARNING: Driver fatigue factor is increasing trip durations. "
+                f"Consider additional breaks."
+            )
+        
+        return "\n".join(calculation_details)
+    
+    def _get_risk_explanation(self, estimated_time: float, available_time: float, 
+                             time_into_shift: float) -> str:
+        """Generate detailed risk level explanation."""
+        if available_time <= 0:
+            return "• Risk Level: CRITICAL (No time remaining)"
+        
+        time_ratio = estimated_time / available_time
+        percentage = time_ratio * 100
+        
+        # Early shift adjustments
+        if time_into_shift < 2.0:
+            thresholds = "• Thresholds (early shift): Low < 80%, Medium 80-110%, High > 110%"
+        else:
+            thresholds = "• Thresholds: Low < 70%, Medium 70-90%, High 90-100%, Critical > 100%"
+        
+        risk_level = self._calculate_risk_level(estimated_time, available_time, time_into_shift)
+        
+        return (f"• Estimated time needed: {estimated_time:.0f} min\n"
+                f"• Time available: {available_time:.0f} min\n"
+                f"• Utilization: {percentage:.1f}%\n"
+                f"• Risk Level: {risk_level.upper()}\n"
+                f"{thresholds}")
+    
     def _generate_recommendation(self, trips_remaining: int, can_complete: bool, 
                                risk_level: str, time_into_shift: float) -> str:
-        """Generate actionable recommendation based on shift progress."""
+        """Generate simple recommendation (kept for backward compatibility)."""
         # Early shift recommendations
         if time_into_shift < 2.0:
             if trips_remaining == 4:

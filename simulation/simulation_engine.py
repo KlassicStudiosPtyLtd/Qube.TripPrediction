@@ -367,7 +367,21 @@ class SimulationEngine:
     def _create_simulation_alert(self, timestamp: datetime, vehicle_id: int,
                                 vehicle_name: str, vehicle_ref: str,
                                 shift_analysis: Any) -> Dict[str, Any]:
-        """Create alert record for simulation."""
+        """Create alert record for simulation with detailed algorithm explanation."""
+        # Extract key metrics for quick summary
+        metrics = shift_analysis.metrics
+        trips_remaining = metrics.get('trips_remaining', 0)
+        
+        # Create a short summary message
+        if shift_analysis.risk_level in ['high', 'critical']:
+            if trips_remaining == 1:
+                short_message = "DO NOT START final trip. High risk of exceeding shift duration."
+            else:
+                safe_trips = max(0, trips_remaining - 1)
+                short_message = f"HIGH RISK: Complete only {safe_trips} more trips."
+        else:
+            short_message = f"Monitor closely. {trips_remaining} trips remaining."
+        
         return {
             'timestamp': timestamp.isoformat(),
             'vehicle_id': vehicle_id,
@@ -377,7 +391,8 @@ class SimulationEngine:
             'shift_start_time': shift_analysis.shift.start_time.isoformat(),
             'shift_end_time': shift_analysis.shift.end_time.isoformat(),
             'alert_type': shift_analysis.risk_level,
-            'message': shift_analysis.recommendation,
+            'message': short_message,  # Short summary for display
+            'algorithm_details': shift_analysis.recommendation,  # Full detailed explanation
             'predicted_outcome': not shift_analysis.can_complete_target,
             'metrics': shift_analysis.metrics
         }
@@ -583,10 +598,10 @@ class SimulationEngine:
         )
     
     def save_simulation_results(self, result: SimulationResult, output_dir: Path):
-        """Save simulation results to files."""
+        """Save simulation results to files with detailed algorithm explanations."""
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save main results
+        # Save main results (JSON includes full details)
         result_dict = {
             'simulation_id': result.simulation_id,
             'start_time': result.start_time.isoformat(),
@@ -607,14 +622,14 @@ class SimulationEngine:
                 }
             },
             'summary_by_vehicle': result.summary_by_vehicle,
-            'alert_timeline': result.alert_timeline,
+            'alert_timeline': result.alert_timeline,  # This includes algorithm_details
             'vehicle_info': result.vehicle_info
         }
         
         with open(output_dir / f'{result.simulation_id}_results.json', 'w') as f:
             json.dump(result_dict, f, indent=2, default=str)
         
-        # Save detailed simulation points
+        # Save detailed simulation points CSV with algorithm details
         points_data = []
         for point in result.simulation_points:
             points_data.append({
@@ -630,10 +645,67 @@ class SimulationEngine:
                 'time_into_shift_hours': point.prediction_details.get('time_into_shift_hours', 0),
                 'risk_level': point.prediction_details.get('risk_level', 'unknown'),
                 'can_complete_target': point.prediction_details.get('can_complete_target', None),
+                'remaining_time_minutes': point.prediction_details.get('remaining_time', 0),
+                'estimated_time_needed_minutes': point.prediction_details.get('estimated_time_needed', 0),
                 'recommendation': point.prediction_details.get('recommendation', '')
             })
         
         df = pd.DataFrame(points_data)
         df.to_csv(output_dir / f'{result.simulation_id}_timeline.csv', index=False)
         
+        # Save detailed alerts CSV with full algorithm explanations
+        if result.alert_timeline:
+            alerts_data = []
+            for alert in result.alert_timeline:
+                alerts_data.append({
+                    'timestamp': alert['timestamp'],
+                    'vehicle_id': alert['vehicle_id'],
+                    'vehicle_name': alert['vehicle_name'],
+                    'vehicle_ref': alert['vehicle_ref'],
+                    'shift_id': alert['shift_id'],
+                    'shift_start': alert.get('shift_start_time', ''),
+                    'shift_end': alert.get('shift_end_time', ''),
+                    'alert_type': alert['alert_type'],
+                    'message': alert['message'],
+                    'trips_completed': alert['metrics'].get('trips_completed', 0),
+                    'trips_target': alert['metrics'].get('trips_target', 0),
+                    'trips_remaining': alert['metrics'].get('trips_remaining', 0),
+                    'time_into_shift_hours': alert['metrics'].get('time_into_shift_hours', 0),
+                    'remaining_time_minutes': alert['metrics'].get('remaining_time', 0),
+                    'estimated_time_needed_minutes': alert['metrics'].get('total_estimated_time', 0),
+                    'avg_trip_duration_minutes': alert['metrics'].get('avg_trip_duration', 0),
+                    'completion_probability': alert['metrics'].get('completion_probability', 0),
+                    'algorithm_details': alert.get('algorithm_details', '')  # Full multi-line explanation
+                })
+            
+            alerts_df = pd.DataFrame(alerts_data)
+            alerts_df.to_csv(output_dir / f'{result.simulation_id}_alerts_detailed.csv', index=False)
+            
+            # Also save a simplified version without the long algorithm details
+            alerts_simple = alerts_df.drop(columns=['algorithm_details'])
+            alerts_simple.to_csv(output_dir / f'{result.simulation_id}_alerts_summary.csv', index=False)
+        
+        # Save analysis points with predictions (for vehicles that had predictions)
+        predictions_data = []
+        for point in result.simulation_points:
+            if point.alert_generated and 'recommendation' in point.prediction_details:
+                predictions_data.append({
+                    'timestamp': point.timestamp.isoformat(),
+                    'vehicle_id': point.vehicle_id,
+                    'vehicle_name': point.vehicle_name,
+                    'shift_id': point.shift_id,
+                    'prediction_details': point.prediction_details.get('recommendation', '')
+                })
+        
+        if predictions_data:
+            predictions_df = pd.DataFrame(predictions_data)
+            predictions_df.to_csv(output_dir / f'{result.simulation_id}_predictions_detailed.csv', index=False)
+        
         logger.info(f"Simulation results saved to {output_dir}")
+        logger.info(f"  - Main results: {result.simulation_id}_results.json")
+        logger.info(f"  - Timeline: {result.simulation_id}_timeline.csv")
+        if result.alert_timeline:
+            logger.info(f"  - Detailed alerts: {result.simulation_id}_alerts_detailed.csv")
+            logger.info(f"  - Alert summary: {result.simulation_id}_alerts_summary.csv")
+        if predictions_data:
+            logger.info(f"  - Predictions: {result.simulation_id}_predictions_detailed.csv")
