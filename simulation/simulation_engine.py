@@ -598,14 +598,30 @@ class SimulationEngine:
         )
     
     def save_simulation_results(self, result: SimulationResult, output_dir: Path):
-        """Save simulation results to files with detailed algorithm explanations."""
+        """Save simulation results to files with timestamps in specified timezone."""
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save main results (JSON includes full details)
+        # Helper function to convert timestamps
+        def convert_timestamp(ts, timezone=result.timezone):
+            if isinstance(ts, str):
+                if ts.endswith('Z'):
+                    ts = ts[:-1] + '+00:00'
+                dt = datetime.fromisoformat(ts)
+            else:
+                dt = ts
+            
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            
+            tz = pytz.timezone(timezone)
+            dt_local = dt.astimezone(tz)
+            return dt_local.strftime('%Y-%m-%d %H:%M:%S %Z')
+        
+        # Save main results (JSON) with local timezone timestamps
         result_dict = {
             'simulation_id': result.simulation_id,
-            'start_time': result.start_time.isoformat(),
-            'end_time': result.end_time.isoformat(),
+            'start_time': convert_timestamp(result.start_time),
+            'end_time': convert_timestamp(result.end_time),
             'timezone': result.timezone,
             'metrics': {
                 'total_points': result.total_points,
@@ -622,18 +638,26 @@ class SimulationEngine:
                 }
             },
             'summary_by_vehicle': result.summary_by_vehicle,
-            'alert_timeline': result.alert_timeline,  # This includes algorithm_details
+            'alert_timeline': [
+                {
+                    **alert,
+                    'timestamp': convert_timestamp(alert['timestamp']),
+                    'shift_start_time': convert_timestamp(alert['shift_start_time']) if 'shift_start_time' in alert else '',
+                    'shift_end_time': convert_timestamp(alert['shift_end_time']) if 'shift_end_time' in alert else ''
+                }
+                for alert in result.alert_timeline
+            ],
             'vehicle_info': result.vehicle_info
         }
         
         with open(output_dir / f'{result.simulation_id}_results.json', 'w') as f:
             json.dump(result_dict, f, indent=2, default=str)
         
-        # Save detailed simulation points CSV with algorithm details
+        # Save detailed simulation points CSV with local timezone
         points_data = []
         for point in result.simulation_points:
             points_data.append({
-                'timestamp': point.timestamp.isoformat(),
+                'timestamp': convert_timestamp(point.timestamp),
                 'vehicle_id': point.vehicle_id,
                 'vehicle_name': point.vehicle_name,
                 'vehicle_ref': point.vehicle_ref,
@@ -653,18 +677,18 @@ class SimulationEngine:
         df = pd.DataFrame(points_data)
         df.to_csv(output_dir / f'{result.simulation_id}_timeline.csv', index=False)
         
-        # Save detailed alerts CSV with full algorithm explanations
+        # Save detailed alerts CSV with local timezone
         if result.alert_timeline:
             alerts_data = []
             for alert in result.alert_timeline:
                 alerts_data.append({
-                    'timestamp': alert['timestamp'],
+                    'timestamp': convert_timestamp(alert['timestamp']),
                     'vehicle_id': alert['vehicle_id'],
                     'vehicle_name': alert['vehicle_name'],
                     'vehicle_ref': alert['vehicle_ref'],
                     'shift_id': alert['shift_id'],
-                    'shift_start': alert.get('shift_start_time', ''),
-                    'shift_end': alert.get('shift_end_time', ''),
+                    'shift_start': convert_timestamp(alert.get('shift_start_time', '')),
+                    'shift_end': convert_timestamp(alert.get('shift_end_time', '')),
                     'alert_type': alert['alert_type'],
                     'message': alert['message'],
                     'trips_completed': alert['metrics'].get('trips_completed', 0),
@@ -675,7 +699,7 @@ class SimulationEngine:
                     'estimated_time_needed_minutes': alert['metrics'].get('total_estimated_time', 0),
                     'avg_trip_duration_minutes': alert['metrics'].get('avg_trip_duration', 0),
                     'completion_probability': alert['metrics'].get('completion_probability', 0),
-                    'algorithm_details': alert.get('algorithm_details', '')  # Full multi-line explanation
+                    'algorithm_details': alert.get('algorithm_details', '')
                 })
             
             alerts_df = pd.DataFrame(alerts_data)
@@ -685,12 +709,12 @@ class SimulationEngine:
             alerts_simple = alerts_df.drop(columns=['algorithm_details'])
             alerts_simple.to_csv(output_dir / f'{result.simulation_id}_alerts_summary.csv', index=False)
         
-        # Save analysis points with predictions (for vehicles that had predictions)
+        # Save analysis points with predictions
         predictions_data = []
         for point in result.simulation_points:
             if point.alert_generated and 'recommendation' in point.prediction_details:
                 predictions_data.append({
-                    'timestamp': point.timestamp.isoformat(),
+                    'timestamp': convert_timestamp(point.timestamp),
                     'vehicle_id': point.vehicle_id,
                     'vehicle_name': point.vehicle_name,
                     'shift_id': point.shift_id,
@@ -701,7 +725,7 @@ class SimulationEngine:
             predictions_df = pd.DataFrame(predictions_data)
             predictions_df.to_csv(output_dir / f'{result.simulation_id}_predictions_detailed.csv', index=False)
         
-        logger.info(f"Simulation results saved to {output_dir}")
+        logger.info(f"Simulation results saved to {output_dir} with {result.timezone} timestamps")
         logger.info(f"  - Main results: {result.simulation_id}_results.json")
         logger.info(f"  - Timeline: {result.simulation_id}_timeline.csv")
         if result.alert_timeline:

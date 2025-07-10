@@ -303,30 +303,91 @@ class FleetAnalyzer:
         )
     
     def _save_results(self, fleet_summary: Dict[str, Any], output_path: Path):
-        """Save analysis results with detailed algorithm explanations."""
-        # Save complete analysis (includes algorithm details in shift analyses)
-        with open(output_path / 'fleet_analysis.json', 'w', encoding='utf-8') as f:
-            json.dump(fleet_summary, f, indent=2, default=str, ensure_ascii=False)
+        """Save analysis results with timestamps in specified timezone."""
+        timezone = fleet_summary.get('timezone', 'UTC')
         
-        # Save alerts separately with full details
+        # Helper function to convert timestamps
+        def convert_timestamp(ts):
+            if not ts:
+                return ''
+            if isinstance(ts, str):
+                if ts.endswith('Z'):
+                    ts = ts[:-1] + '+00:00'
+                dt = datetime.fromisoformat(ts)
+            else:
+                dt = ts
+            
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            
+            tz = pytz.timezone(timezone)
+            dt_local = dt.astimezone(tz)
+            return dt_local.strftime('%Y-%m-%d %H:%M:%S %Z')
+        
+        # Convert timestamps in fleet_summary for JSON
+        fleet_summary_converted = fleet_summary.copy()
+        
+        # Convert analysis period timestamps
+        if 'analysis_period' in fleet_summary_converted:
+            period = fleet_summary_converted['analysis_period']
+            if 'start_utc' in period:
+                period['start_time'] = convert_timestamp(period['start_utc'])
+            if 'end_utc' in period:
+                period['end_time'] = convert_timestamp(period['end_utc'])
+        
+        # Convert alert timestamps
+        if 'alerts' in fleet_summary_converted:
+            for alert in fleet_summary_converted['alerts']:
+                if 'timestamp' in alert:
+                    alert['timestamp'] = convert_timestamp(alert['timestamp'])
+        
+        # Convert shift timestamps in vehicle analyses
+        for vehicle_id, analysis in fleet_summary_converted.get('vehicle_analyses', {}).items():
+            # Convert trip timestamps
+            for trip in analysis.get('trips', []):
+                if 'start_time' in trip:
+                    trip['start_time'] = convert_timestamp(trip['start_time'])
+                if 'end_time' in trip:
+                    trip['end_time'] = convert_timestamp(trip['end_time'])
+            
+            # Convert shift analysis timestamps
+            for shift_analysis in analysis.get('shift_analyses', []):
+                shift = shift_analysis.get('shift', {})
+                if 'start_time' in shift:
+                    shift['start_time'] = convert_timestamp(shift['start_time'])
+                if 'end_time' in shift:
+                    shift['end_time'] = convert_timestamp(shift['end_time'])
+        
+        # Save complete analysis with converted timestamps
+        with open(output_path / 'fleet_analysis.json', 'w', encoding='utf-8') as f:
+            json.dump(fleet_summary_converted, f, indent=2, default=str, ensure_ascii=False)
+        
+        # Save alerts separately with timezone conversion
         if self.alerts:
-            alerts_data = [alert.to_dict() for alert in self.alerts]
+            alerts_data = []
+            for alert in self.alerts:
+                alert_dict = alert.to_dict()
+                alert_dict['timestamp'] = convert_timestamp(alert_dict['timestamp'])
+                alerts_data.append(alert_dict)
+            
             with open(output_path / 'alerts.json', 'w', encoding='utf-8') as f:
                 json.dump(alerts_data, f, indent=2, default=str, ensure_ascii=False)
             
-            # Also save alerts to CSV with algorithm details
+            # Save alerts to CSV with local timezone
             alerts_for_csv = []
             for alert in self.alerts:
                 alert_dict = alert.to_dict()
                 details = alert_dict.get('details', {})
                 
                 alerts_for_csv.append({
-                    'timestamp': alert_dict['timestamp'],
+                    'timestamp': convert_timestamp(alert_dict['timestamp']),
                     'alert_id': alert_dict['alert_id'],
                     'vehicle_id': alert_dict['vehicle_id'],
                     'vehicle_name': alert_dict['vehicle_name'],
                     'driver_id': alert_dict['driver_id'],
                     'shift_date': alert_dict['shift_date'],
+                    'shift_start': convert_timestamp(details.get('shift_start', '')),
+                    'shift_end': convert_timestamp(details.get('shift_end', '')),
                     'severity': alert_dict['severity'],
                     'message': alert_dict['message'],
                     'trips_completed': details.get('trips_completed', 0),
@@ -337,7 +398,7 @@ class FleetAnalyzer:
                     'time_into_shift_hours': details.get('time_into_shift_hours', 0),
                     'completion_probability': details.get('completion_probability', 0),
                     'average_trip_duration': details.get('average_trip_duration', 0),
-                    'algorithm_details': details.get('algorithm_details', '')  # Full explanation
+                    'algorithm_details': details.get('algorithm_details', '')
                 })
             
             # Save detailed CSV
@@ -349,9 +410,9 @@ class FleetAnalyzer:
             alerts_summary = alerts_df.drop(columns=['algorithm_details'])
             alerts_summary.to_csv(output_path / 'alerts_summary.csv', index=False, encoding='utf-8')
             
-            logger.info(f"Saved {len(self.alerts)} alerts to CSV files")
+            logger.info(f"Saved {len(self.alerts)} alerts with {timezone} timestamps")
         
-        # Save shift analysis summary to CSV
+        # Save shift analysis summary to CSV with local timezone
         shift_summary_data = []
         for vehicle_id, analysis in fleet_summary.get('vehicle_analyses', {}).items():
             for shift_analysis in analysis.get('shift_analyses', []):
@@ -363,8 +424,8 @@ class FleetAnalyzer:
                     'vehicle_name': analysis.get('vehicle_name', ''),
                     'vehicle_ref': analysis.get('vehicle_ref', ''),
                     'shift_id': shift.get('shift_id', ''),
-                    'shift_start': shift.get('start_time', ''),
-                    'shift_end': shift.get('end_time', ''),
+                    'shift_start': convert_timestamp(shift.get('start_time', '')),
+                    'shift_end': convert_timestamp(shift.get('end_time', '')),
                     'duration_hours': shift.get('duration_hours', 0),
                     'trips_completed': metrics.get('trips_completed', 0),
                     'trips_target': metrics.get('trips_target', 0),
@@ -382,7 +443,7 @@ class FleetAnalyzer:
             import pandas as pd
             shifts_df = pd.DataFrame(shift_summary_data)
             shifts_df.to_csv(output_path / 'shift_analysis_summary.csv', index=False, encoding='utf-8')
-            logger.info(f"Saved {len(shift_summary_data)} shift analyses to CSV")
+            logger.info(f"Saved {len(shift_summary_data)} shift analyses with {timezone} timestamps")
     
     def _save_vehicle_analysis(self, vehicle_id: int, vehicle_name: str,
                              analysis: Dict[str, Any], output_path: Path):
