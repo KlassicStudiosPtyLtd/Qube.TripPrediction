@@ -119,6 +119,7 @@
                 "--target-trips", "4",
                 "--cache-dir", "./simulation_cache",
                 "--default-trip-duration", "60",
+                "--interactive",
                 "--log-level", "INFO"
             ],
             "console": "integratedTerminal",

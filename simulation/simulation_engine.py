@@ -131,7 +131,8 @@ class SimulationEngine:
                       simulation_interval_hours: float = 1.0,
                       timezone: str = 'UTC',
                       vehicles_to_simulate: Optional[List[int]] = None,
-                      use_cache: bool = True) -> SimulationResult:
+                      use_cache: bool = True,
+                      interactive_mode: bool = False) -> SimulationResult:
         """
         Run a historical simulation over the specified time period.
         
@@ -143,6 +144,7 @@ class SimulationEngine:
             timezone: Timezone for display and shift boundaries
             vehicles_to_simulate: Specific vehicles to simulate (None = all vehicles)
             use_cache: Whether to use cached API responses if available
+            interactive_mode: If True, pause after each time period to show alerts
             
         Returns:
             SimulationResult with complete analysis
@@ -156,6 +158,7 @@ class SimulationEngine:
         logger.info(f"Starting historical simulation for fleet {fleet_id}")
         logger.info(f"Simulation period: {start_date} to {end_date} (UTC)")
         logger.info(f"Simulation interval: {simulation_interval_hours} hours")
+        logger.info(f"Interactive mode: {'ENABLED' if interactive_mode else 'DISABLED'}")
         
         # Get vehicles
         vehicles = self._get_fleet_vehicles(fleet_id)
@@ -191,8 +194,17 @@ class SimulationEngine:
         if current_time.tzinfo is None:
             current_time = pytz.UTC.localize(current_time)
         
+        # Import helper functions if interactive mode is enabled
+        if interactive_mode:
+            try:
+                from run_simulation import print_time_period_alerts, wait_for_user_input
+            except ImportError:
+                logger.warning("Could not import interactive functions from run_simulation module")
+                interactive_mode = False
+        
         with tqdm(total=int((end_date - start_date).total_seconds() / 3600 / simulation_interval_hours),
-                  desc="Running simulation") as pbar:
+                  desc="Running simulation", 
+                  disable=interactive_mode) as pbar:  # Disable progress bar in interactive mode
             
             while current_time <= end_date:
                 # Run analysis at this time point
@@ -201,11 +213,26 @@ class SimulationEngine:
                 )
                 
                 simulation_points.extend(point_results['points'])
-                alert_timeline.extend(point_results['alerts'])
+                current_period_alerts = point_results['alerts']
+                alert_timeline.extend(current_period_alerts)
+                
+                # Interactive mode: show alerts and wait for user input
+                if interactive_mode:
+                    try:
+                        print_time_period_alerts(current_time, current_period_alerts, timezone)
+                        if current_time < end_date:  # Don't wait after the last period
+                            wait_for_user_input()
+                    except KeyboardInterrupt:
+                        logger.info("Simulation interrupted by user")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Error in interactive mode: {e}")
+                        # Continue with simulation even if interactive functions fail
+                else:
+                    pbar.update(1)
                 
                 # Move to next time point
                 current_time += timedelta(hours=simulation_interval_hours)
-                pbar.update(1)
         
         # Analyze results
         result = self._analyze_simulation_results(

@@ -17,6 +17,49 @@ from main import parse_datetime_string
 logger = logging.getLogger(__name__)
 
 
+def print_time_period_alerts(current_time: datetime, alerts: list, timezone: str):
+    """Print alerts generated during the current time period."""
+    if not alerts:
+        print(f"\n⏰ {current_time.astimezone(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print("   ✅ No alerts generated this period")
+        return
+    
+    print(f"\n⏰ {current_time.astimezone(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print(f"   🚨 {len(alerts)} alert(s) generated:")
+    
+    for i, alert in enumerate(alerts, 1):
+        vehicle_name = alert.get('vehicle_name', f"Vehicle {alert['vehicle_id']}")
+        vehicle_ref = alert.get('vehicle_ref', 'Unknown')
+        risk_level = alert.get('alert_type', 'unknown').upper()
+        
+        # Color coding
+        if risk_level in ['HIGH', 'CRITICAL']:
+            color = '\033[91m'  # Red
+        elif risk_level == 'MEDIUM':
+            color = '\033[93m'  # Yellow
+        else:
+            color = '\033[94m'  # Blue
+        reset = '\033[0m'
+        
+        print(f"   {i}. {color}[{risk_level}]{reset} {vehicle_name} ({vehicle_ref})")
+        print(f"      → {alert.get('message', 'No message')}")
+        
+        # Show trip progress
+        metrics = alert.get('metrics', {})
+        trips_completed = metrics.get('trips_completed', 0)
+        trips_target = metrics.get('trips_target', 0)
+        print(f"      → Progress: {trips_completed}/{trips_target} trips completed")
+
+
+def wait_for_user_input():
+    """Wait for user to press Enter to continue."""
+    try:
+        input("\n   Press Enter to continue simulation...")
+    except KeyboardInterrupt:
+        print("\n\nSimulation interrupted by user.")
+        raise
+
+
 @click.command()
 @click.option('--fleet-id', type=int, required=True, help='Fleet ID to simulate')
 @click.option('--start-date', required=True, 
@@ -45,13 +88,15 @@ logger = logging.getLogger(__name__)
               help='Directory for caching API responses (set to empty string to disable)')
 @click.option('--no-cache', is_flag=True, default=False,
               help='Disable caching even if cache-dir is set')
+@click.option('--interactive', is_flag=True, default=False,
+              help='Interactive mode: pause after each time period to show alerts and wait for user input')
 @click.option('--log-level', default='INFO', help='Logging level')
 def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
                   interval_hours: float, output_dir: str, vehicles: tuple,
                   shift_hours: float, target_trips: int, buffer_minutes: int,
                   default_trip_duration: float, start_waypoint: str, 
                   end_waypoint: str, waypoint_matching: str, 
-                  cache_dir: str, no_cache: bool, log_level: str):
+                  cache_dir: str, no_cache: bool, interactive: bool, log_level: str):
     """
     Run historical simulation to test shift analysis algorithms.
     
@@ -63,10 +108,10 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
         # Simulate a full week with hourly analysis
         run_simulation.py --fleet-id 104002 --start-date 2025-06-10 --end-date 2025-06-17
         
-        # Simulate specific vehicles with 30-minute intervals
+        # Simulate specific vehicles with 30-minute intervals in interactive mode
         run_simulation.py --fleet-id 104002 --start-date "2025-06-15 06:00:00" \\
             --end-date "2025-06-15 18:00:00" --interval-hours 0.5 \\
-            --vehicles 1234 --vehicles 5678
+            --vehicles 1234 --vehicles 5678 --interactive
     """
     # Set up logging
     setup_logging(log_level)
@@ -77,6 +122,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
     logger.info(f"Fleet ID: {fleet_id}")
     logger.info(f"Simulation Period: {start_date} to {end_date} ({timezone})")
     logger.info(f"Analysis Interval: {interval_hours} hours")
+    logger.info(f"Interactive Mode: {'ENABLED' if interactive else 'DISABLED'}")
     
     if vehicles:
         logger.info(f"Simulating specific vehicles: {list(vehicles)}")
@@ -120,7 +166,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
         engine = SimulationEngine(api_client, shift_config, analysis_config, 
                                  cache_dir=cache_directory)
         
-        # Run simulation
+        # Run simulation with interactive mode
         logger.info("\nStarting simulation...")
         if cache_directory:
             logger.info(f"Using cache directory: {cache_directory}")
@@ -134,7 +180,8 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
             simulation_interval_hours=interval_hours,
             timezone=timezone,
             vehicles_to_simulate=list(vehicles) if vehicles else None,
-            use_cache=not no_cache
+            use_cache=not no_cache,
+            interactive_mode=interactive
         )
         
         # Save results
@@ -146,6 +193,49 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
         
     except Exception as e:
         logger.error(f"Error during simulation: {str(e)}", exc_info=True)
+
+
+def print_time_period_alerts(current_time: datetime, alerts: list, timezone: str):
+    """Print alerts generated during the current time period."""
+    if not alerts:
+        print(f"\n⏰ {current_time.astimezone(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print("   ✅ No alerts generated this period")
+        return
+    
+    print(f"\n⏰ {current_time.astimezone(pytz.timezone(timezone)).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print(f"   🚨 {len(alerts)} alert(s) generated:")
+    
+    for i, alert in enumerate(alerts, 1):
+        vehicle_name = alert.get('vehicle_name', f"Vehicle {alert['vehicle_id']}")
+        vehicle_ref = alert.get('vehicle_ref', 'Unknown')
+        risk_level = alert.get('alert_type', 'unknown').upper()
+        
+        # Color coding
+        if risk_level in ['HIGH', 'CRITICAL']:
+            color = '\033[91m'  # Red
+        elif risk_level == 'MEDIUM':
+            color = '\033[93m'  # Yellow
+        else:
+            color = '\033[94m'  # Blue
+        reset = '\033[0m'
+        
+        print(f"   {i}. {color}[{risk_level}]{reset} {vehicle_name} ({vehicle_ref})")
+        print(f"      → {alert.get('message', 'No message')}")
+        
+        # Show trip progress
+        metrics = alert.get('metrics', {})
+        trips_completed = metrics.get('trips_completed', 0)
+        trips_target = metrics.get('trips_target', 0)
+        print(f"      → Progress: {trips_completed}/{trips_target} trips completed")
+
+
+def wait_for_user_input():
+    """Wait for user to press Enter to continue."""
+    try:
+        input("\n   Press Enter to continue simulation...")
+    except KeyboardInterrupt:
+        print("\n\nSimulation interrupted by user.")
+        raise
 
 
 def print_simulation_summary(result, output_path: Path):
@@ -195,22 +285,22 @@ def print_simulation_summary(result, output_path: Path):
     # Show sample alerts
     if result.alert_timeline:
         print(f"\n{'SAMPLE ALERTS (First 5)':^60}")
-        print(f"{'-'*60}")
-        
-        for i, alert in enumerate(result.alert_timeline[:5]):
-            timestamp = datetime.fromisoformat(alert['timestamp'].replace('Z', '+00:00'))
-            local_time = timestamp.astimezone(pytz.timezone(result.timezone))
-            
-            # Get vehicle display info from alert
-            vehicle_name = alert.get('vehicle_name', f"Vehicle {alert['vehicle_id']}")
-            vehicle_ref = alert.get('vehicle_ref', 'Unknown')
-            vehicle_display = f"{vehicle_name} ({vehicle_ref})"
-            
-            print(f"\n{i+1}. {local_time.strftime('%Y-%m-%d %H:%M:%S')} - {vehicle_display}")
-            print(f"   Type: {alert['alert_type'].upper()}")
-            print(f"   Message: {alert['message']}")
-            print(f"   Metrics: Trips {alert['metrics'].get('trips_completed')}/{alert['metrics'].get('trips_target')}")
-    
+    print(f"{'-'*60}")
+   
+    for i, alert in enumerate(result.alert_timeline[:5]):
+        timestamp = datetime.fromisoformat(alert['timestamp'].replace('Z', '+00:00'))
+        local_time = timestamp.astimezone(pytz.timezone(result.timezone))
+       
+        # Get vehicle display info from alert
+        vehicle_name = alert.get('vehicle_name', f"Vehicle {alert['vehicle_id']}")
+        vehicle_ref = alert.get('vehicle_ref', 'Unknown')
+        vehicle_display = f"{vehicle_name} ({vehicle_ref})"
+       
+        print(f"\n{i+1}. {local_time.strftime('%Y-%m-%d %H:%M:%S')} - {vehicle_display}")
+        print(f"   Type: {alert['alert_type'].upper()}")
+        print(f"   Message: {alert['message']}")
+        print(f"   Metrics: Trips {alert['metrics'].get('trips_completed')}/{alert['metrics'].get('trips_target')}")
+
     print(f"\n{'='*60}")
     print(f"Results saved to: {output_path}")
     print(f"  - Summary: {result.simulation_id}_results.json")
