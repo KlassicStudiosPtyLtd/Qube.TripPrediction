@@ -1,8 +1,7 @@
 """
 Historical Simulation Engine for Fleet Shift Analysis
 
-This module provides a framework for backtesting shift analysis algorithms
-on historical data to validate predictions and alert generation.
+Updated to properly handle shift boundaries and avoid false alerts at shift start.
 """
 import logging
 from datetime import datetime, timedelta
@@ -61,7 +60,7 @@ class SimulationResult:
     simulation_points: List[SimulationPoint]
     summary_by_vehicle: Dict[int, Dict[str, Any]]
     alert_timeline: List[Dict[str, Any]]
-    vehicle_info: Dict[int, Dict[str, str]] = field(default_factory=dict)  # Store vehicle names and refs
+    vehicle_info: Dict[int, Dict[str, str]] = field(default_factory=dict)
     
 
 class SimulationEngine:
@@ -92,7 +91,7 @@ class SimulationEngine:
         # Storage
         self.simulation_points = []
         self.alert_history = []
-        self.vehicle_info = {}  # Store vehicle names and refs
+        self.vehicle_info = {}
         
         # Create cache directory if specified
         if self.cache_dir:
@@ -204,7 +203,7 @@ class SimulationEngine:
         
         with tqdm(total=int((end_date - start_date).total_seconds() / 3600 / simulation_interval_hours),
                   desc="Running simulation", 
-                  disable=interactive_mode) as pbar:  # Disable progress bar in interactive mode
+                  disable=interactive_mode) as pbar:
             
             while current_time <= end_date:
                 # Run analysis at this time point
@@ -248,6 +247,14 @@ class SimulationEngine:
         points = []
         alerts = []
         
+        # Store analysis time for shift analyzer to use
+        self.shift_analyzer.analysis_end_time = simulation_time
+        
+        # Get the current shift period
+        current_shift_start, current_shift_end = self.shift_analyzer._identify_shift_period(
+            simulation_time, timezone
+        )
+        
         for vehicle_id, full_history in all_vehicle_data.items():
             # Get vehicle info
             vehicle_name = self.vehicle_info.get(vehicle_id, {}).get('name', f'Vehicle_{vehicle_id}')
@@ -281,9 +288,6 @@ class SimulationEngine:
                     logger.debug(f"Skipping event with invalid timestamp: {e}")
                     continue
             
-            if not available_data:
-                continue
-            
             # Create vehicle data structure
             vehicle_data = {
                 'vehicleId': vehicle_id,
@@ -294,21 +298,24 @@ class SimulationEngine:
             # Extract trips from available data
             trips = self.trip_extractor.extract_trips(vehicle_data)
             
-            if not trips:
-                continue
+            # Filter trips to only those that started before simulation time
+            relevant_trips = [
+                trip for trip in trips 
+                if trip.start_time <= simulation_time
+            ]
             
-            # Analyze shifts with data up to simulation_time
+            # Analyze shifts with proper boundaries
             shift_analyses = self.shift_analyzer.analyze_shifts(
-                vehicle_id, vehicle_name, trips, timezone,
+                vehicle_id, vehicle_name, relevant_trips, timezone,
                 analysis_end_time=simulation_time
             )
             
-            # Process each shift
+            # Only process the current active shift
             for shift_analysis in shift_analyses:
                 shift = shift_analysis.shift
                 
-                # Only process active shifts (those that include the simulation time)
-                if shift.start_time <= simulation_time <= shift.end_time:
+                # Check if this is the current shift
+                if shift.start_time == current_shift_start and shift.end_time == current_shift_end:
                     # Create simulation point
                     point = self._create_simulation_point(
                         simulation_time, vehicle_id, vehicle_name, vehicle_ref, 
@@ -316,7 +323,7 @@ class SimulationEngine:
                     )
                     points.append(point)
                     
-                    # Check for alerts
+                    # Check for alerts (shift_analysis already considers time into shift)
                     if shift_analysis.alert_required:
                         alert = self._create_simulation_alert(
                             simulation_time, vehicle_id, vehicle_name, vehicle_ref,
@@ -352,7 +359,8 @@ class SimulationEngine:
                 'risk_level': shift_analysis.risk_level,
                 'recommendation': shift_analysis.recommendation,
                 'remaining_time': metrics.get('remaining_time', 0),
-                'estimated_time_needed': metrics.get('total_estimated_time', 0)
+                'estimated_time_needed': metrics.get('total_estimated_time', 0),
+                'time_into_shift_hours': metrics.get('time_into_shift_hours', 0)
             }
         )
     
@@ -366,6 +374,8 @@ class SimulationEngine:
             'vehicle_name': vehicle_name,
             'vehicle_ref': vehicle_ref,
             'shift_id': shift_analysis.shift.shift_id,
+            'shift_start_time': shift_analysis.shift.start_time.isoformat(),
+            'shift_end_time': shift_analysis.shift.end_time.isoformat(),
             'alert_type': shift_analysis.risk_level,
             'message': shift_analysis.recommendation,
             'predicted_outcome': not shift_analysis.can_complete_target,
@@ -617,7 +627,10 @@ class SimulationEngine:
                 'trips_predicted': point.trips_predicted,
                 'alert_generated': point.alert_generated,
                 'alert_type': point.alert_type,
-                'prediction_details': point.prediction_details
+                'time_into_shift_hours': point.prediction_details.get('time_into_shift_hours', 0),
+                'risk_level': point.prediction_details.get('risk_level', 'unknown'),
+                'can_complete_target': point.prediction_details.get('can_complete_target', None),
+                'recommendation': point.prediction_details.get('recommendation', '')
             })
         
         df = pd.DataFrame(points_data)

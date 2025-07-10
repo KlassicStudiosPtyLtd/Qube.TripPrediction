@@ -118,8 +118,7 @@
                 "--shift-hours", "12",
                 "--target-trips", "4",
                 "--cache-dir", "./simulation_cache",
-                "--default-trip-duration", "60",
-                "--interactive",
+                "--default-trip-duration", "90",
                 "--log-level", "INFO"
             ],
             "console": "integratedTerminal",

@@ -1,5 +1,6 @@
 """
 Main fleet analyzer that orchestrates the analysis with timezone support.
+Updated to work properly with fixed shift boundaries.
 """
 import json
 import logging
@@ -199,17 +200,18 @@ class FleetAnalyzer:
             # Extract trips (they'll be in UTC)
             trips = self.trip_extractor.extract_trips(history_data)
             
-            # Analyze shifts with timezone awareness AND analysis end time
+            # Analyze shifts with timezone awareness
+            # Note: we pass end_datetime as analysis_end_time but it won't truncate shifts
             shift_analyses = self.shift_analyzer.analyze_shifts(
                 vehicle_id, vehicle_name, trips, timezone, 
-                analysis_end_time=end_datetime  # Pass the analysis end time
+                analysis_end_time=end_datetime
             )
             
             # Create vehicle analysis
             analysis = {
                 'vehicle_id': vehicle_id,
                 'vehicle_name': vehicle_name,
-                'vehicle_ref': vehicle_ref,  # Add vehicleRef
+                'vehicle_ref': vehicle_ref,
                 'total_trips': len(trips),
                 'shift_analyses': [sa.to_dict() for sa in shift_analyses],
                 'trips': [trip.to_dict() for trip in trips],
@@ -304,7 +306,7 @@ class FleetAnalyzer:
         """Save analysis results."""
         # Save complete analysis
         with open(output_path / 'fleet_analysis.json', 'w', encoding='utf-8') as f:
-            json.dump(fleet_summary, f, indent=2, default=str, ensure_ascii=False)  # default=str handles datetime
+            json.dump(fleet_summary, f, indent=2, default=str, ensure_ascii=False)
         
         # Save alerts separately
         if self.alerts:
