@@ -59,3 +59,4 @@ htmlcov/
 simulation_cache/
 #simulation results
 simulation_results/
+simulation_cache.zip

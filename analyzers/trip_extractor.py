@@ -22,6 +22,27 @@ class TripExtractor:
     def __init__(self, config: ShiftConfig):
         self.config = config
         self.data_processor = DataProcessor()
+        self._reason_code_stats = {}  # Track reason codes we encounter
+        
+    def _is_departure_event(self, reason_code: str) -> bool:
+        """Check if a reason code indicates a departure event."""
+        if not reason_code:
+            return False
+        code_upper = str(reason_code).strip().upper()
+        return code_upper[:3] == 'DEP'
+    
+    def _is_arrival_event(self, reason_code: str) -> bool:
+        """Check if a reason code indicates an arrival event."""
+        if not reason_code:
+            return False
+        code_upper = str(reason_code).strip().upper()
+        return code_upper[:3] == 'ARR'
+    
+    def _track_reason_code(self, reason_code: str):
+        """Track reason codes for debugging purposes."""
+        if reason_code not in self._reason_code_stats:
+            self._reason_code_stats[reason_code] = 0
+        self._reason_code_stats[reason_code] += 1
         
     def extract_trips(self, vehicle_data: Dict[str, Any]) -> List[Trip]:
         """
@@ -80,6 +101,14 @@ class TripExtractor:
         logger.info(f"Extracted {len(trips)} trips for vehicle {vehicle_data.get('vehicleId')} "
                    f"(mode: {self.config.round_trip_mode})")
         
+        # Log reason code statistics if in debug mode
+        if logger.isEnabledFor(logging.DEBUG) and self._reason_code_stats:
+            logger.debug("Reason code statistics:")
+            for code, count in sorted(self._reason_code_stats.items()):
+                event_type = "departure" if self._is_departure_event(code) else \
+                            "arrival" if self._is_arrival_event(code) else "unknown"
+                logger.debug(f"  {code}: {count} occurrences ({event_type})")
+        
         return trips
     
     def _extract_three_point_round_trips(self, df: pd.DataFrame, vehicle_id: int,
@@ -111,12 +140,24 @@ class TripExtractor:
         logger.debug(f"Looking for three-point trips: {start_waypoint} -> {target_waypoint} -> {end_waypoint}")
         
         for idx, row in df.iterrows():
-            reason_code = row.get('reasonCode')
+            reason_code = str(row.get('reasonCode', '')).strip()
             place_name = row.get('placeName', '')
+            
+            # Track reason codes for debugging
+            if reason_code:
+                self._track_reason_code(reason_code)
+            
+            # Determine if this is an arrival or departure
+            is_departure = self._is_departure_event(reason_code)
+            is_arrival = self._is_arrival_event(reason_code)
+            
+            # Log unexpected reason codes
+            if reason_code and not is_departure and not is_arrival:
+                logger.debug(f"Unrecognized reason code: {reason_code} at {place_name}")
             
             # Check for start waypoint
             if self._matches_waypoint(place_name, start_waypoint):
-                if reason_code == 'DepWayPoint' and trip_state['status'] == 'waiting_for_start':
+                if is_departure and trip_state['status'] == 'waiting_for_start':
                     # Starting new round trip
                     logger.debug(f"Starting new three-point trip from {start_waypoint} at {row['timestamp']}")
                     trip_state['status'] = 'going_to_target'
@@ -134,7 +175,7 @@ class TripExtractor:
                     
             # Check for target waypoint
             elif self._matches_waypoint(place_name, target_waypoint):
-                if reason_code == 'ArrWayPoint' and trip_state['status'] == 'going_to_target':
+                if is_arrival and trip_state['status'] == 'going_to_target':
                     # Arrived at target
                     logger.debug(f"Arrived at target {target_waypoint} at {row['timestamp']}")
                     trip_state['status'] = 'at_target'
@@ -152,7 +193,7 @@ class TripExtractor:
                     if segment:
                         trip_state['segments'].append(segment)
                     
-                elif reason_code == 'DepWayPoint' and trip_state['status'] == 'at_target':
+                elif is_departure and trip_state['status'] == 'at_target':
                     # Departing from target
                     logger.debug(f"Departing from target {target_waypoint} at {row['timestamp']}")
                     trip_state['status'] = 'going_to_end'
@@ -162,7 +203,7 @@ class TripExtractor:
                     
             # Check for end waypoint
             elif self._matches_waypoint(place_name, end_waypoint):
-                if reason_code == 'ArrWayPoint' and trip_state['status'] == 'going_to_end':
+                if is_arrival and trip_state['status'] == 'going_to_end':
                     # Completed round trip!
                     logger.debug(f"Completed three-point trip at {end_waypoint} at {row['timestamp']}")
                     trip_state['waypoints_visited'].append(end_waypoint)
@@ -373,12 +414,12 @@ class TripExtractor:
         
         # Find all departures from start waypoint
         start_departures = self._find_waypoint_events(
-            df, start_waypoint, 'DepWayPoint'
+            df, start_waypoint, 'departure'
         )
         
         # Find all arrivals at end waypoint
         end_arrivals = self._find_waypoint_events(
-            df, end_waypoint, 'ArrWayPoint'
+            df, end_waypoint, 'arrival'
         )
         
         logger.debug(f"Found {len(start_departures)} departures from {start_waypoint}")
@@ -421,19 +462,27 @@ class TripExtractor:
     
     def _extract_general_waypoint_trips(self, df: pd.DataFrame, 
                                       vehicle_id: int) -> List[Trip]:
-        """Extract trips based on all DepWayPoint and ArrWayPoint events."""
+        """Extract trips based on all departure and arrival events."""
         trips = []
         current_trip_data = None
         
         for idx, row in df.iterrows():
-            reason_code = row.get('reasonCode')
+            reason_code = str(row.get('reasonCode', '')).strip()
             
-            if reason_code == 'DepWayPoint':
+            # Track reason codes for debugging
+            if reason_code:
+                self._track_reason_code(reason_code)
+            
+            # Determine if this is an arrival or departure
+            is_departure = self._is_departure_event(reason_code)
+            is_arrival = self._is_arrival_event(reason_code)
+            
+            if is_departure:
                 current_trip_data = self._handle_departure(
                     current_trip_data, row, idx, df.loc[idx, 'timestamp']
                 )
                 
-            elif reason_code == 'ArrWayPoint' and current_trip_data:
+            elif is_arrival and current_trip_data:
                 trip = self._handle_arrival(
                     current_trip_data, row, idx, df, vehicle_id
                 )
@@ -451,9 +500,25 @@ class TripExtractor:
     
     def _find_waypoint_events(self, df: pd.DataFrame, waypoint_name: str,
                             event_type: str) -> pd.DataFrame:
-        """Find waypoint events matching the given criteria."""
-        # Filter by event type
-        events = df[df['reasonCode'] == event_type].copy()
+        """
+        Find waypoint events matching the given criteria.
+        
+        Args:
+            df: Vehicle history DataFrame
+            waypoint_name: Waypoint name to match
+            event_type: 'departure' or 'arrival'
+            
+        Returns:
+            DataFrame of matching events
+        """
+        # Filter by event type based on first 3 letters of reason code
+        if event_type == 'departure':
+            events = df[df['reasonCode'].str[:3].str.upper() == 'DEP'].copy()
+        elif event_type == 'arrival':
+            events = df[df['reasonCode'].str[:3].str.upper() == 'ARR'].copy()
+        else:
+            logger.warning(f"Unknown event type: {event_type}")
+            return pd.DataFrame()
         
         if events.empty:
             return events

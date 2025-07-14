@@ -215,7 +215,7 @@
                 "--interval-hours", "1.0",
                 "--output-dir", "./simulation_results/PLS",
                 "--shift-hours", "12",
-                "--target-trips", "4",
+                "--target-trips", "3",
                 "--round-trip-mode", "three_point",
                 "--start-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
                 "--target-waypoint", "PLS Mine site_PHEHR190325",
