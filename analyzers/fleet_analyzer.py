@@ -1,5 +1,5 @@
 """
-Main fleet analyzer that orchestrates the analysis with timezone support.
+Main fleet analyzer that orchestrates the analysis with timezone support and vehicle ref filtering.
 Updated to work properly with fixed shift boundaries.
 """
 import json
@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 from tqdm import tqdm
@@ -30,10 +30,11 @@ class FleetAnalyzer:
     """Main analyzer for fleet-wide shift analysis with timezone support."""
     
     def __init__(self, api_client, shift_config: ShiftConfig, 
-                 analysis_config: AnalysisConfig):
+                 analysis_config: AnalysisConfig, cache_dir: Optional[str] = None):
         self.api_client = api_client
         self.shift_config = shift_config
         self.analysis_config = analysis_config
+        self.cache_dir = Path(cache_dir) if cache_dir else None
         
         # Initialize components
         self.trip_extractor = TripExtractor(shift_config)
@@ -47,8 +48,13 @@ class FleetAnalyzer:
         self.vehicle_analyses = {}
         self.alerts = []
         
+        # Create cache directory if specified
+        if self.cache_dir:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Cache directory: {self.cache_dir}")
+        
     def analyze_fleet(self, fleet_id: int, start_datetime: datetime, end_datetime: datetime,
-                     output_dir: str, timezone: str = 'UTC') -> Dict[str, Any]:
+                     output_dir: str, timezone: str = 'UTC', vehicle_ref_filter: str = None) -> Dict[str, Any]:
         """
         Perform complete fleet analysis.
         
@@ -58,6 +64,7 @@ class FleetAnalyzer:
             end_datetime: End datetime (UTC)
             output_dir: Output directory path
             timezone: Timezone for display (e.g., 'Australia/Perth')
+            vehicle_ref_filter: Optional vehicle ref to filter analysis to a single vehicle
             
         Returns:
             Fleet analysis summary
@@ -65,6 +72,9 @@ class FleetAnalyzer:
         logger.info(f"Starting fleet analysis for fleet {fleet_id}")
         logger.info(f"Analysis period (UTC): {start_datetime} to {end_datetime}")
         logger.info(f"Display timezone: {timezone}")
+        
+        if vehicle_ref_filter:
+            logger.info(f"Filtering analysis to vehicle ref: {vehicle_ref_filter}")
         
         # Create output directory
         output_path = Path(output_dir)
@@ -76,10 +86,62 @@ class FleetAnalyzer:
             logger.error(f"No vehicles found for fleet {fleet_id}")
             return {}
         
+        # Filter by vehicle ref if specified
+        if vehicle_ref_filter:
+            # First, we need to get vehicle history to find the vehicleRef
+            # We'll do a quick API call for each vehicle to check its ref
+            filtered_vehicles = []
+            for vehicle in vehicles:
+                try:
+                    # Get a small sample of history to extract vehicleRef
+                    # Use a shorter time period for the ref check
+                    ref_check_end = start_datetime + timedelta(hours=1)
+                    
+                    # Check cache first if available
+                    vehicle_ref = None
+                    if self.cache_dir:
+                        # Try to find any cached file for this vehicle to get the ref
+                        cache_pattern = f"fleet_{fleet_id}_vehicle_{vehicle['id']}_*.json"
+                        cache_files = list(self.cache_dir.glob(cache_pattern))
+                        if cache_files:
+                            # Load the first cache file to get vehicleRef
+                            try:
+                                with open(cache_files[0], 'r') as f:
+                                    cached_data = json.load(f)
+                                    if cached_data.get('history') and len(cached_data['history']) > 0:
+                                        vehicle_ref = cached_data['history'][0].get('vehicleRef', '')
+                                        logger.debug(f"Got vehicleRef from cache: {vehicle_ref}")
+                            except Exception as e:
+                                logger.debug(f"Could not read cache file: {e}")
+                    
+                    # If not found in cache, make API call
+                    if not vehicle_ref:
+                        history = self.api_client.get_vehicle_history(
+                            fleet_id=fleet_id,
+                            vehicle_id=vehicle['id'],
+                            start_date=start_datetime,
+                            end_date=ref_check_end
+                        )
+                        if history and len(history) > 0:
+                            vehicle_ref = history[0].get('vehicleRef', '')
+                    
+                    if vehicle_ref == vehicle_ref_filter:
+                        logger.info(f"Found matching vehicle: {vehicle.get('displayName')} (ID: {vehicle['id']}, Ref: {vehicle_ref})")
+                        filtered_vehicles.append(vehicle)
+                        break  # Found our vehicle, no need to check others
+                except Exception as e:
+                    logger.debug(f"Could not check vehicle {vehicle['id']}: {e}")
+            
+            if not filtered_vehicles:
+                logger.error(f"No vehicle found with ref: {vehicle_ref_filter}")
+                return {}
+            
+            vehicles = filtered_vehicles
+        
         logger.info(f"Found {len(vehicles)} vehicles")
         
         # Analyze vehicles
-        if self.analysis_config.parallel_processing:
+        if self.analysis_config.parallel_processing and not vehicle_ref_filter:
             self._analyze_vehicles_parallel(
                 vehicles, fleet_id, start_datetime, end_datetime, output_path, timezone
             )
@@ -230,10 +292,46 @@ class FleetAnalyzer:
             logger.error(f"Error analyzing vehicle {vehicle_id}: {str(e)}")
             return None
     
-    def _get_vehicle_history(self, fleet_id: int, vehicle_id: int,
-                       start_datetime: datetime, end_datetime: datetime) -> Optional[Dict[str, Any]]:
-        """Get vehicle history from API using UTC times."""
+    def _get_cache_filename(self, fleet_id: int, vehicle_id: int, 
+                           start_date: datetime, end_date: datetime) -> Path:
+        """Generate cache filename for vehicle history."""
+        start_str = start_date.strftime('%Y%m%d_%H%M%S')
+        end_str = end_date.strftime('%Y%m%d_%H%M%S')
+        return self.cache_dir / f"fleet_{fleet_id}_vehicle_{vehicle_id}_{start_str}_to_{end_str}.json"
+    
+    def _load_cached_history(self, cache_file: Path) -> Optional[Dict[str, Any]]:
+        """Load vehicle history from cache if available."""
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                logger.debug(f"Loaded cached data from {cache_file.name}")
+                return data
+            except Exception as e:
+                logger.warning(f"Failed to load cache file {cache_file}: {e}")
+        return None
+    
+    def _save_to_cache(self, cache_file: Path, data: Dict[str, Any]):
+        """Save vehicle history to cache."""
         try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, default=str)
+            logger.debug(f"Saved data to cache: {cache_file.name}")
+        except Exception as e:
+            logger.warning(f"Failed to save cache file {cache_file}: {e}")
+    
+    def _get_vehicle_history(self, fleet_id: int, vehicle_id: int,
+                       start_datetime: datetime, end_datetime: datetime,
+                       use_cache: bool = True) -> Optional[Dict[str, Any]]:
+        """Get vehicle history from API using UTC times, with caching support."""
+        try:
+            # Check cache first if enabled
+            if use_cache and self.cache_dir:
+                cache_file = self._get_cache_filename(fleet_id, vehicle_id, start_datetime, end_datetime)
+                cached_data = self._load_cached_history(cache_file)
+                if cached_data:
+                    return cached_data
+            
             # Call API with datetime objects (already in UTC)
             history = self.api_client.get_vehicle_history(
                 fleet_id=fleet_id,
@@ -242,13 +340,21 @@ class FleetAnalyzer:
                 end_date=end_datetime
             )
             
-            return {
+            result = {
                 'vehicleId': vehicle_id,
                 'fleetId': fleet_id,
                 'history': history,
                 'startServerTime': start_datetime.isoformat(),
                 'endServerTime': end_datetime.isoformat()
             }
+            
+            # Save to cache if enabled
+            if use_cache and self.cache_dir and history:
+                cache_file = self._get_cache_filename(fleet_id, vehicle_id, start_datetime, end_datetime)
+                self._save_to_cache(cache_file, result)
+            
+            return result
+            
         except Exception as e:
             logger.error(f"Error getting history for vehicle {vehicle_id}: {str(e)}")
             return None

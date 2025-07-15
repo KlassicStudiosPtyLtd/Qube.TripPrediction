@@ -1,5 +1,5 @@
 """
-Data models for fleet shift analyzer with timezone support.
+Data models for fleet shift analyzer with three-point round trip support.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -8,8 +8,28 @@ import pytz
 
 
 @dataclass
+class TripSegment:
+    """Represents a segment of a multi-point trip."""
+    segment_id: str
+    from_waypoint: str
+    to_waypoint: str
+    start_time: datetime
+    end_time: datetime
+    duration_minutes: float
+    distance_m: float
+    route_points: List[Dict[str, Any]]
+    
+    def __post_init__(self):
+        """Ensure timestamps are timezone-aware."""
+        if self.start_time.tzinfo is None:
+            self.start_time = pytz.UTC.localize(self.start_time)
+        if self.end_time.tzinfo is None:
+            self.end_time = pytz.UTC.localize(self.end_time)
+
+
+@dataclass
 class Trip:
-    """Represents a single trip with timezone-aware timestamps."""
+    """Represents a trip with support for multi-segment round trips."""
     trip_id: str
     vehicle_id: int
     driver_id: Optional[str]
@@ -21,6 +41,13 @@ class Trip:
     distance_m: float
     route: List[Dict[str, Any]]
     is_round_trip: bool
+    
+    # Enhanced fields for three-point trips
+    trip_type: str = 'simple'  # 'simple', 'two_point_round', 'three_point_round'
+    trip_segments: List[TripSegment] = field(default_factory=list)
+    waypoints_visited: List[str] = field(default_factory=list)
+    is_complete_round_trip: bool = False  # True when all required waypoints visited
+    target_waypoint: Optional[str] = None  # For three-point trips
     
     def __post_init__(self):
         """Ensure timestamps are timezone-aware."""
@@ -35,6 +62,19 @@ class Trip:
         """Get distance in kilometers."""
         return self.distance_m / 1000
     
+    @property
+    def segment_count(self) -> int:
+        """Get number of segments in the trip."""
+        return len(self.trip_segments)
+    
+    def get_segment_duration(self, segment_type: str) -> Optional[float]:
+        """Get duration for a specific segment type."""
+        if segment_type == 'start_to_target' and len(self.trip_segments) > 0:
+            return self.trip_segments[0].duration_minutes
+        elif segment_type == 'target_to_end' and len(self.trip_segments) > 1:
+            return self.trip_segments[1].duration_minutes
+        return None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -48,7 +88,21 @@ class Trip:
             'duration_minutes': self.duration_minutes,
             'distance_m': self.distance_m,
             'route': self.route,
-            'is_round_trip': self.is_round_trip
+            'is_round_trip': self.is_round_trip,
+            'trip_type': self.trip_type,
+            'waypoints_visited': self.waypoints_visited,
+            'is_complete_round_trip': self.is_complete_round_trip,
+            'target_waypoint': self.target_waypoint,
+            'segment_count': self.segment_count,
+            'trip_segments': [
+                {
+                    'segment_id': seg.segment_id,
+                    'from': seg.from_waypoint,
+                    'to': seg.to_waypoint,
+                    'duration_minutes': seg.duration_minutes,
+                    'distance_m': seg.distance_m
+                } for seg in self.trip_segments
+            ]
         }
 
 
@@ -77,8 +131,19 @@ class Shift:
     
     @property
     def trips_completed(self) -> int:
-        """Get number of completed trips."""
+        """Get number of completed trips (counts complete round trips for three-point mode)."""
         return len(self.trips)
+    
+    @property
+    def complete_round_trips(self) -> int:
+        """Get number of complete round trips."""
+        return sum(1 for trip in self.trips if trip.is_complete_round_trip)
+    
+    @property
+    def incomplete_round_trips(self) -> List[Trip]:
+        """Get list of incomplete round trips."""
+        return [trip for trip in self.trips 
+                if trip.trip_type == 'three_point_round' and not trip.is_complete_round_trip]
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -90,7 +155,9 @@ class Shift:
             'end_time': self.end_time.isoformat(),
             'duration_hours': self.duration_hours,
             'trips': [trip.to_dict() for trip in self.trips],
-            'trips_completed': self.trips_completed
+            'trips_completed': self.trips_completed,
+            'complete_round_trips': self.complete_round_trips,
+            'incomplete_round_trips': len(self.incomplete_round_trips)
         }
 
 
@@ -104,6 +171,10 @@ class TripPrediction:
     risk_level: str  # 'low', 'medium', 'high'
     recommendation: str
     factors: Dict[str, Any] = field(default_factory=dict)
+    
+    # Enhanced fields for three-point predictions
+    segment_predictions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    total_segments: int = 1
     
     def __post_init__(self):
         """Ensure timestamp is timezone-aware."""
@@ -119,7 +190,9 @@ class TripPrediction:
             'will_complete_in_shift': self.will_complete_in_shift,
             'risk_level': self.risk_level,
             'recommendation': self.recommendation,
-            'factors': self.factors
+            'factors': self.factors,
+            'segment_predictions': self.segment_predictions,
+            'total_segments': self.total_segments
         }
 
 

@@ -1,6 +1,5 @@
 """
-Shift analysis logic with timezone support and fixed shift boundaries.
-Enhanced with detailed algorithmic explanations in recommendations.
+Shift analysis logic with three-point round trip support.
 """
 import logging
 from datetime import datetime, timedelta
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ShiftAnalyzer:
-    """Analyzes shifts for completion prediction with timezone support."""
+    """Analyzes shifts for completion prediction with three-point round trip support."""
     
     def __init__(self, config: ShiftConfig):
         self.config = config
@@ -157,8 +156,17 @@ class ShiftAnalyzer:
         return shift_start_utc, shift_end_utc
     
     def _analyze_single_shift(self, shift: Shift) -> ShiftAnalysis:
-        """Analyze a single shift for completion prediction."""
-        trips_completed = shift.trips_completed
+        """Analyze a single shift for completion prediction with three-point support."""
+        # Determine what to count based on mode
+        if self.config.round_trip_mode == 'three_point':
+            # Count complete round trips
+            trips_completed = shift.complete_round_trips
+            incomplete_count = len(shift.incomplete_round_trips)
+        else:
+            # Count all trips
+            trips_completed = shift.trips_completed
+            incomplete_count = 0
+        
         trips_remaining = max(0, self.config.target_trips - trips_completed)
         
         # Calculate how far into the shift we are
@@ -175,46 +183,14 @@ class ShiftAnalyzer:
         
         # Get current status
         if trips_remaining == 0:
-            return ShiftAnalysis(
-                shift=shift,
-                predictions=[],
-                can_complete_target=True,
-                risk_level='none',
-                alert_required=False,
-                recommendation=self._generate_detailed_recommendation(
-                    trips_completed, trips_remaining, 0, 0, 0,
-                    True, 'none', time_into_shift, shift, []
-                ),
-                metrics={
-                    'trips_completed': trips_completed,
-                    'trips_target': self.config.target_trips,
-                    'completion_rate': 1.0,
-                    'time_into_shift_hours': time_into_shift
-                }
+            return self._create_target_achieved_analysis(
+                shift, trips_completed, time_into_shift, incomplete_count
             )
         
         # For new shifts with no trips, use more appropriate messaging
-        if trips_completed == 0 and time_into_shift < 2.0:  # Less than 2 hours into shift
-            remaining_time = (shift.end_time - current_time).total_seconds() / 60
-            
-            return ShiftAnalysis(
-                shift=shift,
-                predictions=[],
-                can_complete_target=True,
-                risk_level='low',
-                alert_required=False,
-                recommendation=self._generate_detailed_recommendation(
-                    trips_completed, trips_remaining, remaining_time, 0, 0,
-                    True, 'low', time_into_shift, shift, []
-                ),
-                metrics={
-                    'trips_completed': 0,
-                    'trips_target': self.config.target_trips,
-                    'completion_rate': 0.0,
-                    'time_into_shift_hours': time_into_shift,
-                    'shift_duration_hours': shift.duration_hours,
-                    'remaining_time': remaining_time
-                }
+        if trips_completed == 0 and time_into_shift < 2.0:
+            return self._create_early_shift_analysis(
+                shift, current_time, time_into_shift, trips_remaining
             )
         
         # Get last trip end time or current time if no trips
@@ -227,7 +203,7 @@ class ShiftAnalyzer:
         if last_trip_end.tzinfo is None:
             last_trip_end = pytz.UTC.localize(last_trip_end)
         
-        # Calculate remaining time (use full shift duration, not truncated)
+        # Calculate remaining time
         remaining_time = (shift.end_time - last_trip_end).total_seconds() / 60
         
         # Predict remaining trips
@@ -255,8 +231,32 @@ class ShiftAnalyzer:
         recommendation = self._generate_detailed_recommendation(
             trips_completed, trips_remaining, remaining_time, 
             total_estimated_time, buffer_adjusted_time,
-            can_complete, risk_level, time_into_shift, shift, predictions
+            can_complete, risk_level, time_into_shift, shift, predictions,
+            incomplete_count
         )
+        
+        # Build metrics
+        metrics = {
+            'trips_completed': trips_completed,
+            'trips_target': self.config.target_trips,
+            'trips_remaining': trips_remaining,
+            'avg_trip_duration': self._calculate_average_trip_duration(shift),
+            'total_estimated_time': total_estimated_time,
+            'remaining_time': remaining_time,
+            'buffer_adjusted_time': buffer_adjusted_time,
+            'completion_probability': 1.0 - (total_estimated_time / buffer_adjusted_time) if buffer_adjusted_time > 0 else 0,
+            'time_into_shift_hours': time_into_shift,
+            'shift_duration_hours': shift.duration_hours,
+            'incomplete_round_trips': incomplete_count
+        }
+        
+        # Add three-point specific metrics
+        if self.config.round_trip_mode == 'three_point':
+            metrics['complete_round_trips'] = shift.complete_round_trips
+            metrics['round_trip_completion_rate'] = (
+                shift.complete_round_trips / len(shift.trips) 
+                if shift.trips else 0
+            )
         
         return ShiftAnalysis(
             shift=shift,
@@ -265,18 +265,99 @@ class ShiftAnalyzer:
             risk_level=risk_level,
             alert_required=risk_level in ['high', 'critical'] and time_into_shift >= 1.0,
             recommendation=recommendation,
-            metrics={
-                'trips_completed': trips_completed,
-                'trips_target': self.config.target_trips,
-                'trips_remaining': trips_remaining,
-                'avg_trip_duration': np.mean([t.duration_minutes for t in shift.trips]) if shift.trips else 0,
-                'total_estimated_time': total_estimated_time,
-                'remaining_time': remaining_time,
-                'buffer_adjusted_time': buffer_adjusted_time,
-                'completion_probability': 1.0 - (total_estimated_time / buffer_adjusted_time) if buffer_adjusted_time > 0 else 0,
-                'time_into_shift_hours': time_into_shift,
-                'shift_duration_hours': shift.duration_hours
-            }
+            metrics=metrics
+        )
+    
+    def _calculate_average_trip_duration(self, shift: Shift) -> float:
+        """Calculate average trip duration based on mode."""
+        if not shift.trips:
+            return 0
+        
+        if self.config.round_trip_mode == 'three_point':
+            # For three-point mode, calculate average of complete round trips
+            complete_trips = [t for t in shift.trips if t.is_complete_round_trip]
+            if complete_trips:
+                return np.mean([t.duration_minutes for t in complete_trips])
+            else:
+                # Fall back to all trips if no complete round trips
+                return np.mean([t.duration_minutes for t in shift.trips])
+        else:
+            # Simple mode: average of all trips
+            return np.mean([t.duration_minutes for t in shift.trips])
+    
+    def _create_target_achieved_analysis(self, shift: Shift, trips_completed: int,
+                                       time_into_shift: float, incomplete_count: int) -> ShiftAnalysis:
+        """Create analysis for shifts that have achieved their target."""
+        metrics = {
+            'trips_completed': trips_completed,
+            'trips_target': self.config.target_trips,
+            'completion_rate': 1.0,
+            'time_into_shift_hours': time_into_shift,
+            'incomplete_round_trips': incomplete_count
+        }
+        
+        recommendation = f"TARGET ACHIEVED - Algorithm Status:\n"
+        recommendation += f"• Completed: {trips_completed}/{self.config.target_trips} "
+        
+        if self.config.round_trip_mode == 'three_point':
+            recommendation += "complete round trips\n"
+            if incomplete_count > 0:
+                recommendation += f"• Incomplete round trips: {incomplete_count}\n"
+        else:
+            recommendation += "trips\n"
+        
+        recommendation += f"• Time used: {time_into_shift:.1f} hours\n"
+        recommendation += f"• Recommendation: Target met. Additional trips optional."
+        
+        return ShiftAnalysis(
+            shift=shift,
+            predictions=[],
+            can_complete_target=True,
+            risk_level='none',
+            alert_required=False,
+            recommendation=recommendation,
+            metrics=metrics
+        )
+    
+    def _create_early_shift_analysis(self, shift: Shift, current_time: datetime,
+                                   time_into_shift: float, trips_remaining: int) -> ShiftAnalysis:
+        """Create analysis for early in shift with no trips."""
+        remaining_time = (shift.end_time - current_time).total_seconds() / 60
+        
+        metrics = {
+            'trips_completed': 0,
+            'trips_target': self.config.target_trips,
+            'completion_rate': 0.0,
+            'time_into_shift_hours': time_into_shift,
+            'shift_duration_hours': shift.duration_hours,
+            'remaining_time': remaining_time,
+            'incomplete_round_trips': 0
+        }
+        
+        recommendation = f"SHIFT START - Algorithm Status:\n"
+        recommendation += f"• Time into shift: {time_into_shift:.1f} hours\n"
+        recommendation += f"• Remaining shift time: {remaining_time / 60:.1f} hours\n"
+        recommendation += f"• Target: {self.config.target_trips} "
+        
+        if self.config.round_trip_mode == 'three_point':
+            recommendation += f"three-point round trips\n"
+            recommendation += f"• Route: {self.config.start_waypoint} → {self.config.target_waypoint} → {self.config.end_waypoint}\n"
+            total_est = sum(self.config.default_segment_durations.values())
+            recommendation += f"• Estimated round trip duration: {total_est} min\n"
+        else:
+            recommendation += f"trips\n"
+            recommendation += f"• Default trip duration: {self.config.default_trip_duration_minutes} min\n"
+        
+        recommendation += f"• Recommendation: Begin first trip when ready."
+        
+        return ShiftAnalysis(
+            shift=shift,
+            predictions=[],
+            can_complete_target=True,
+            risk_level='low',
+            alert_required=False,
+            recommendation=recommendation,
+            metrics=metrics
         )
     
     def _calculate_risk_level(self, estimated_time: float, available_time: float, 
@@ -315,47 +396,40 @@ class ShiftAnalyzer:
                                         remaining_time: float, total_estimated_time: float,
                                         buffer_adjusted_time: float, can_complete: bool,
                                         risk_level: str, time_into_shift: float,
-                                        shift: Shift, predictions: List[TripPrediction]) -> str:
+                                        shift: Shift, predictions: List[TripPrediction],
+                                        incomplete_count: int) -> str:
         """Generate detailed recommendation with algorithmic explanation."""
         
         # Format time values
         remaining_hours = remaining_time / 60
         buffer_hours = self.config.buffer_time_minutes / 60
         
-        # Early shift - special handling
-        if time_into_shift < 2.0 and trips_completed == 0:
-            return (f"SHIFT START - Algorithm Status:\n"
-                    f"• Time into shift: {time_into_shift:.1f} hours\n"
-                    f"• Remaining shift time: {remaining_hours:.1f} hours\n"
-                    f"• Target: {self.config.target_trips} trips\n"
-                    f"• Default trip duration: {self.config.default_trip_duration_minutes} min\n"
-                    f"• Estimated total time needed: {self.config.target_trips * self.config.default_trip_duration_minutes} min\n"
-                    f"• Recommendation: Begin first trip when ready.")
-        
-        # Target achieved
-        if trips_remaining == 0:
-            return (f"TARGET ACHIEVED - Algorithm Status:\n"
-                    f"• Completed: {trips_completed}/{self.config.target_trips} trips\n"
-                    f"• Time used: {shift.duration_hours - (remaining_hours):.1f} hours\n"
-                    f"• Average trip duration: {np.mean([t.duration_minutes for t in shift.trips]):.1f} min\n"
-                    f"• Recommendation: Target met. Additional trips optional.")
-        
         # Build detailed algorithm explanation
         calculation_details = []
         
+        # Mode-specific header
+        if self.config.round_trip_mode == 'three_point':
+            calculation_details.append(f"THREE-POINT ROUND TRIP ANALYSIS - Algorithm Status:")
+            calculation_details.append(f"Route: {self.config.start_waypoint} → {self.config.target_waypoint} → {self.config.end_waypoint}")
+        else:
+            calculation_details.append(f"TRIP ANALYSIS - Algorithm Status:")
+        
         # Historical data section
         if shift.trips:
-            avg_duration = np.mean([t.duration_minutes for t in shift.trips])
+            avg_duration = self._calculate_average_trip_duration(shift)
             std_duration = np.std([t.duration_minutes for t in shift.trips]) if len(shift.trips) > 1 else 0
             calculation_details.append(
-                f"HISTORICAL DATA:\n"
+                f"\nHISTORICAL DATA:\n"
                 f"• Trips completed: {trips_completed}\n"
                 f"• Average duration: {avg_duration:.1f} min\n"
                 f"• Standard deviation: {std_duration:.1f} min"
             )
+            
+            if self.config.round_trip_mode == 'three_point' and incomplete_count > 0:
+                calculation_details.append(f"• Incomplete round trips: {incomplete_count}")
         else:
             calculation_details.append(
-                f"HISTORICAL DATA:\n"
+                f"\nHISTORICAL DATA:\n"
                 f"• No trips completed yet\n"
                 f"• Using default duration: {self.config.default_trip_duration_minutes} min"
             )
@@ -374,21 +448,15 @@ class ShiftAnalyzer:
             pred_details = "\nTRIP PREDICTIONS:"
             for i, pred in enumerate(predictions):
                 trip_num = trips_completed + i + 1
-                factors = pred.factors
                 
-                # Build factors string
-                factor_strs = []
-                if factors.get('is_peak_hour'):
-                    factor_strs.append("peak hour +15%")
-                if factors.get('fatigue_factor', 1.0) > 1.0:
-                    fatigue_pct = (factors['fatigue_factor'] - 1.0) * 100
-                    factor_strs.append(f"fatigue +{fatigue_pct:.0f}%")
-                if factors.get('duration_variance', 0) > 0:
-                    factor_strs.append(f"variance +{factors['duration_variance']:.1f} min")
-                
-                factors_str = f" ({', '.join(factor_strs)})" if factor_strs else ""
-                
-                pred_details += f"\n• Trip {trip_num}: {pred.estimated_duration_minutes:.1f} min{factors_str}"
+                if self.config.round_trip_mode == 'three_point' and pred.segment_predictions:
+                    pred_details += f"\n• Round Trip {trip_num}:"
+                    for segment, seg_pred in pred.segment_predictions.items():
+                        segment_name = segment.replace('_', ' ').title()
+                        pred_details += f"\n  - {segment_name}: {seg_pred['adjusted_duration']:.1f} min"
+                    pred_details += f"\n  - Total: {pred.estimated_duration_minutes:.1f} min"
+                else:
+                    pred_details += f"\n• Trip {trip_num}: {pred.estimated_duration_minutes:.1f} min"
             
             calculation_details.append(pred_details)
             calculation_details.append(
@@ -406,13 +474,12 @@ class ShiftAnalyzer:
         elif can_complete and risk_level == 'medium':
             action = f"Continue with {trips_remaining} trips but maintain steady pace. Monitor progress."
         elif risk_level == 'high':
-            if trips_remaining == 1:
-                action = "DO NOT START final trip. High risk of exceeding shift duration."
+            if self.config.round_trip_mode == 'three_point':
+                action = "HIGH RISK: Consider skipping final round trip or completing partial trip only."
             else:
-                safe_trips = max(0, trips_remaining - 1)
-                action = f"HIGH RISK: Complete only {safe_trips} more trips. Skip final trip."
+                action = "HIGH RISK: Consider skipping final trip."
         else:  # critical
-            safe_trips = max(0, trips_remaining - 2) if trips_remaining > 2 else 0
+            safe_trips = max(0, trips_remaining - 1)
             action = f"CRITICAL: Complete maximum {safe_trips} trips. Multiple trips at risk."
         
         calculation_details.append(f"\nRECOMMENDATION: {action}")
@@ -422,6 +489,13 @@ class ShiftAnalyzer:
             calculation_details.append(
                 f"\n⚠️ FATIGUE WARNING: Driver fatigue factor is increasing trip durations. "
                 f"Consider additional breaks."
+            )
+        
+        # Three-point specific warnings
+        if self.config.round_trip_mode == 'three_point' and incomplete_count > 1:
+            calculation_details.append(
+                f"\n⚠️ PATTERN WARNING: {incomplete_count} incomplete round trips detected. "
+                f"Consider investigating causes."
             )
         
         return "\n".join(calculation_details)
@@ -448,30 +522,3 @@ class ShiftAnalyzer:
                 f"• Utilization: {percentage:.1f}%\n"
                 f"• Risk Level: {risk_level.upper()}\n"
                 f"{thresholds}")
-    
-    def _generate_recommendation(self, trips_remaining: int, can_complete: bool, 
-                               risk_level: str, time_into_shift: float) -> str:
-        """Generate simple recommendation (kept for backward compatibility)."""
-        # Early shift recommendations
-        if time_into_shift < 2.0:
-            if trips_remaining == 4:
-                return f"Start completing trips. Target: {trips_remaining} trips in this shift."
-            elif trips_remaining > 0:
-                return f"Good progress. {trips_remaining} trips remaining to meet target."
-            else:
-                return "Excellent! Target already achieved."
-        
-        # Normal recommendations
-        if can_complete and risk_level == 'low':
-            return f"Continue with remaining {trips_remaining} trips. Ample time available."
-        
-        elif can_complete and risk_level == 'medium':
-            return f"Continue with remaining {trips_remaining} trips but maintain steady pace."
-        
-        elif risk_level in ['high', 'critical']:
-            if trips_remaining == 1:
-                return "DO NOT START final trip. High risk of exceeding shift duration."
-            else:
-                return f"HIGH RISK: Consider completing only {trips_remaining-1} trips."
-        
-        return "Monitor closely. Situation requires attention."
