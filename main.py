@@ -123,6 +123,8 @@ def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
               help='Default duration for Start->Target segment (three-point mode)')
 @click.option('--segment-duration-target-end', default=None, type=float,
               help='Default duration for Target->End segment (three-point mode)')
+@click.option('--vehicle-ref', default=None, help='Filter analysis to a specific vehicle by reference (e.g., T123)')
+@click.option('--cache-dir', default=None, help='Directory for caching API responses (speeds up repeated analyses)')
 @click.option('--parallel', is_flag=True, default=True, help='Enable parallel processing')
 @click.option('--max-workers', default=4, type=int, help='Maximum parallel workers')
 @click.option('--log-level', default='INFO', help='Logging level')
@@ -133,6 +135,7 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
          waypoint_matching: str, round_trip_mode: str,
          require_waypoint_order: bool, allow_partial_trips: bool,
          segment_duration_start_target: float, segment_duration_target_end: float,
+         vehicle_ref: str, cache_dir: str,
          parallel: bool, max_workers: int, log_level: str):
     """
     Analyze fleet-wide shift completion with three-point round trip support.
@@ -170,6 +173,12 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
     logger.info(f"Fleet ID: {fleet_id}")
     logger.info(f"Date Range: {start_date} to {end_date} ({timezone})")
     logger.info(f"Round Trip Mode: {round_trip_mode}")
+    
+    if vehicle_ref:
+        logger.info(f"Filtering by Vehicle Ref: {vehicle_ref}")
+    
+    if cache_dir:
+        logger.info(f"Using cache directory: {cache_dir}")
     
     # Validate timezone
     try:
@@ -246,8 +255,8 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
         api_logger = logging.getLogger('mtdata_api_client')
         api_client = MTDataApiClient(logger=api_logger)
         
-        # Create analyzer
-        analyzer = FleetAnalyzer(api_client, shift_config, analysis_config)
+        # Create analyzer with cache support
+        analyzer = FleetAnalyzer(api_client, shift_config, analysis_config, cache_dir=cache_dir)
         
         # Run analysis with UTC times
         fleet_summary = analyzer.analyze_fleet(
@@ -255,7 +264,8 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
             start_datetime=start_datetime_utc,
             end_datetime=end_datetime_utc,
             output_dir=output_dir,
-            timezone=timezone
+            timezone=timezone,
+            vehicle_ref_filter=vehicle_ref
         )
         
         # Print summary

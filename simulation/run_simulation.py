@@ -99,6 +99,8 @@ def wait_for_user_input():
               help='Output directory for results')
 @click.option('--vehicles', multiple=True, type=int,
               help='Specific vehicle IDs to simulate (default: all vehicles)')
+@click.option('--vehicle-ref', default=None, 
+              help='Filter simulation to a specific vehicle by reference (e.g., T123)')
 @click.option('--shift-hours', default=12, type=float, help='Shift duration in hours')
 @click.option('--target-trips', default=4, type=int, help='Target trips per shift')
 @click.option('--buffer-minutes', default=30, type=int, help='Buffer time before shift end')
@@ -134,6 +136,7 @@ def wait_for_user_input():
 @click.option('--log-level', default='INFO', help='Logging level')
 def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
                   interval_hours: float, output_dir: str, vehicles: tuple,
+                  vehicle_ref: str,
                   shift_hours: float, target_trips: int, buffer_minutes: int,
                   default_trip_duration: float, start_waypoint: str,
                   target_waypoint: str, end_waypoint: str, waypoint_matching: str,
@@ -191,6 +194,8 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
     
     if vehicles:
         logger.info(f"Simulating specific vehicles: {list(vehicles)}")
+    elif vehicle_ref:
+        logger.info(f"Simulating vehicle with ref: {vehicle_ref}")
     else:
         logger.info("Simulating all fleet vehicles")
     
@@ -256,6 +261,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
             simulation_interval_hours=interval_hours,
             timezone=timezone,
             vehicles_to_simulate=list(vehicles) if vehicles else None,
+            vehicle_ref_filter=vehicle_ref,
             use_cache=not no_cache,
             interactive_mode=interactive
         )
