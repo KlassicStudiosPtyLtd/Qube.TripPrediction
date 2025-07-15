@@ -130,6 +130,7 @@ class SimulationEngine:
                       simulation_interval_hours: float = 1.0,
                       timezone: str = 'UTC',
                       vehicles_to_simulate: Optional[List[int]] = None,
+                      vehicle_ref_filter: Optional[str] = None,
                       use_cache: bool = True,
                       interactive_mode: bool = False) -> SimulationResult:
         """
@@ -142,6 +143,7 @@ class SimulationEngine:
             simulation_interval_hours: How often to run analysis (default: every hour)
             timezone: Timezone for display and shift boundaries
             vehicles_to_simulate: Specific vehicles to simulate (None = all vehicles)
+            vehicle_ref_filter: Filter to a specific vehicle by ref (e.g., 'T123')
             use_cache: Whether to use cached API responses if available
             interactive_mode: If True, pause after each time period to show alerts
             
@@ -159,9 +161,41 @@ class SimulationEngine:
         logger.info(f"Simulation interval: {simulation_interval_hours} hours")
         logger.info(f"Interactive mode: {'ENABLED' if interactive_mode else 'DISABLED'}")
         
+        if vehicle_ref_filter:
+            logger.info(f"Filtering to vehicle ref: {vehicle_ref_filter}")
+        
         # Get vehicles
         vehicles = self._get_fleet_vehicles(fleet_id)
-        if vehicles_to_simulate:
+        
+        # Filter by vehicle ref if specified
+        if vehicle_ref_filter:
+            logger.info(f"Looking for vehicle with ref: {vehicle_ref_filter}")
+            # We need to get history for vehicles to find their refs
+            filtered_vehicles = []
+            for vehicle in vehicles:
+                try:
+                    # Get a small sample of history to extract vehicleRef
+                    history = self.api_client.get_vehicle_history(
+                        fleet_id=fleet_id,
+                        vehicle_id=vehicle['id'],
+                        start_date=start_date,
+                        end_date=start_date + timedelta(hours=1)
+                    )
+                    if history and len(history) > 0:
+                        ref = history[0].get('vehicleRef', '')
+                        if ref == vehicle_ref_filter:
+                            logger.info(f"Found matching vehicle: {vehicle.get('displayName')} (ID: {vehicle['id']}, Ref: {ref})")
+                            filtered_vehicles.append(vehicle)
+                            break
+                except Exception as e:
+                    logger.debug(f"Could not check vehicle {vehicle['id']}: {e}")
+            
+            if not filtered_vehicles:
+                logger.error(f"No vehicle found with ref: {vehicle_ref_filter}")
+                return self._create_empty_result(start_date, end_date, timezone)
+            
+            vehicles = filtered_vehicles
+        elif vehicles_to_simulate:
             vehicles = [v for v in vehicles if v['id'] in vehicles_to_simulate]
         
         if not vehicles:
@@ -360,7 +394,8 @@ class SimulationEngine:
                 'recommendation': shift_analysis.recommendation,
                 'remaining_time': metrics.get('remaining_time', 0),
                 'estimated_time_needed': metrics.get('total_estimated_time', 0),
-                'time_into_shift_hours': metrics.get('time_into_shift_hours', 0)
+                'time_into_shift_hours': metrics.get('time_into_shift_hours', 0),
+                'incomplete_round_trips': metrics.get('incomplete_round_trips', 0)
             }
         )
     
@@ -671,6 +706,7 @@ class SimulationEngine:
                 'can_complete_target': point.prediction_details.get('can_complete_target', None),
                 'remaining_time_minutes': point.prediction_details.get('remaining_time', 0),
                 'estimated_time_needed_minutes': point.prediction_details.get('estimated_time_needed', 0),
+                'incomplete_round_trips': point.prediction_details.get('incomplete_round_trips', 0),
                 'recommendation': point.prediction_details.get('recommendation', '')
             })
         
@@ -699,6 +735,7 @@ class SimulationEngine:
                     'estimated_time_needed_minutes': alert['metrics'].get('total_estimated_time', 0),
                     'avg_trip_duration_minutes': alert['metrics'].get('avg_trip_duration', 0),
                     'completion_probability': alert['metrics'].get('completion_probability', 0),
+                    'incomplete_round_trips': alert['metrics'].get('incomplete_round_trips', 0),
                     'algorithm_details': alert.get('algorithm_details', '')
                 })
             

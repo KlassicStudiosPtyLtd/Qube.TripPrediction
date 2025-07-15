@@ -153,7 +153,10 @@ class TripExtractor:
             
             # Log unexpected reason codes
             if reason_code and not is_departure and not is_arrival:
-                logger.debug(f"Unrecognized reason code: {reason_code} at {place_name}")
+                a = 1 # Placeholder for unexpected reason codes
+                #logger.debug(f"Unrecognized reason code: {reason_code} at {place_name}")
+            else:
+                logger.debug(f"Processing {('departure' if is_departure else 'arrival')}: {place_name} at {row['timestamp']}")
             
             # Check for start waypoint
             if self._matches_waypoint(place_name, start_waypoint):
@@ -172,6 +175,38 @@ class TripExtractor:
                     }
                     trip_state['segments'] = []
                     trip_state['waypoints_visited'] = [start_waypoint]
+                    
+                # Check if this is actually the end waypoint (when start == end)
+                elif is_arrival and trip_state['status'] == 'going_to_end' and start_waypoint == end_waypoint:
+                    # This is arrival at end waypoint (which happens to be same as start)
+                    logger.debug(f"Completed three-point trip at {end_waypoint} (same as start) at {row['timestamp']}")
+                    trip_state['waypoints_visited'].append(end_waypoint)
+                    
+                    # Save second segment (Target -> End)
+                    segment = self._create_trip_segment(
+                        df,
+                        trip_state['current_trip_data']['segment_start_idx'],
+                        idx,
+                        target_waypoint,
+                        end_waypoint,
+                        f"{vehicle_id}_seg2_{trip_state['current_trip_data']['start_time'].strftime('%Y%m%d_%H%M%S')}"
+                    )
+                    if segment:
+                        trip_state['segments'].append(segment)
+                    
+                    # Create complete trip
+                    trip = self._create_three_point_trip(
+                        df, vehicle_id, trip_state, idx, row
+                    )
+                    
+                    if trip:
+                        trips.append(trip)
+                    
+                    # Reset state
+                    trip_state['status'] = 'waiting_for_start'
+                    trip_state['current_trip_data'] = None
+                    trip_state['segments'] = []
+                    trip_state['waypoints_visited'] = []
                     
             # Check for target waypoint
             elif self._matches_waypoint(place_name, target_waypoint):
@@ -201,8 +236,8 @@ class TripExtractor:
                     trip_state['current_trip_data']['segment_start_time'] = row['timestamp']
                     trip_state['current_trip_data']['segment_start_location'] = (row['latitude'], row['longitude'])
                     
-            # Check for end waypoint
-            elif self._matches_waypoint(place_name, end_waypoint):
+            # Check for end waypoint (only if different from start)
+            elif self._matches_waypoint(place_name, end_waypoint) and end_waypoint != start_waypoint:
                 if is_arrival and trip_state['status'] == 'going_to_end':
                     # Completed round trip!
                     logger.debug(f"Completed three-point trip at {end_waypoint} at {row['timestamp']}")
