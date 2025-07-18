@@ -14,6 +14,11 @@ from simulation_engine import SimulationEngine
 from core.utils import setup_logging
 from main import parse_datetime_string
 
+import json
+from pathlib import Path
+from analyzers.trip_report_generator import TripReportGenerator
+from analyzers.trip_extractor import TripExtractor
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +139,9 @@ def wait_for_user_input():
 @click.option('--interactive', is_flag=True, default=False,
               help='Interactive mode: pause after each time period to show alerts and wait for user input')
 @click.option('--log-level', default='INFO', help='Logging level')
+@click.option('--generate-trip-reports', is_flag=True, default=False,
+              help='Generate trip timeline reports after simulation using cached data')
+
 def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
                   interval_hours: float, output_dir: str, vehicles: tuple,
                   vehicle_ref: str,
@@ -143,6 +151,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
                   round_trip_mode: str, require_waypoint_order: bool,
                   allow_partial_trips: bool, segment_duration_start_target: float,
                   segment_duration_target_end: float,
+                  generate_trip_reports: bool,
                   cache_dir: str, no_cache: bool, interactive: bool, log_level: str):
     """
     Run historical simulation to test shift analysis algorithms with three-point support.
@@ -272,6 +281,43 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
         
         # Print summary
         print_simulation_summary(result, output_path, shift_config)
+
+       # Generate trip reports from simulation cache if requested
+        if generate_trip_reports and cache_directory:
+            logger.info("\n" + "="*60)
+            logger.info("GENERATING TRIP REPORTS FROM SIMULATION CACHE")
+            logger.info("="*60)
+            
+            try:
+                # Initialize trip report generator
+                trip_report_generator = TripReportGenerator(timezone=timezone)
+                
+                # Create output directory for trip reports
+                trip_report_path = output_path / 'trip_reports'
+                trip_report_path.mkdir(exist_ok=True)
+                
+                # Generate reports from cache directory
+                report_file = trip_report_generator.generate_trip_reports_from_cache_dir(
+                    cache_dir=Path(cache_directory),
+                    output_path=trip_report_path,
+                    fleet_id=fleet_id,
+                    shift_config=shift_config,
+                    vehicle_ref_filter=vehicle_ref
+                )
+                
+                if report_file:
+                    logger.info(f"\nTrip reports generated successfully!")
+                    logger.info(f"Main report: {report_file}")
+                    summary_path = trip_report_path / f"trip_timeline_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    logger.info(f"Summary: {summary_path}")
+                else:
+                    logger.warning("Trip report generation completed with warnings")
+                    
+            except Exception as e:
+                logger.error(f"Error generating trip reports: {e}", exc_info=True)
+                
+        elif generate_trip_reports and not cache_directory:
+            logger.warning("Trip reports requested but cache is disabled. Enable cache with --cache-dir option.")
         
     except Exception as e:
         logger.error(f"Error during simulation: {str(e)}", exc_info=True)
@@ -379,3 +425,5 @@ def print_simulation_summary(result, output_path: Path, shift_config: ShiftConfi
 
 if __name__ == "__main__":
     run_simulation()
+
+

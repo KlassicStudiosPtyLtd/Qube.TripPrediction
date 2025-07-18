@@ -99,6 +99,8 @@ class Trip:
                     'segment_id': seg.segment_id,
                     'from': seg.from_waypoint,
                     'to': seg.to_waypoint,
+                    'start_time': seg.start_time.isoformat(), 
+                    'end_time': seg.end_time.isoformat(),
                     'duration_minutes': seg.duration_minutes,
                     'distance_m': seg.distance_m
                 } for seg in self.trip_segments

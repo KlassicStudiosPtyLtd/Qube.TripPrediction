@@ -16,6 +16,7 @@ from config import ShiftConfig, AnalysisConfig
 from models import Alert
 from analyzers.trip_extractor import TripExtractor
 from analyzers.shift_analyzer import ShiftAnalyzer
+from analyzers.trip_report_generator import TripReportGenerator
 from monitoring.alert_manager import AlertManager
 from visualization.dashboard_generator import DashboardGenerator
 from visualization.map_generator import MapGenerator
@@ -42,6 +43,7 @@ class FleetAnalyzer:
         self.alert_manager = AlertManager()
         self.dashboard_generator = DashboardGenerator()
         self.map_generator = MapGenerator()
+        self.trip_report_generator = TripReportGenerator(timezone=shift_config.timezone)
         
         # Storage
         self.fleet_data = {}
@@ -277,7 +279,8 @@ class FleetAnalyzer:
                 'total_trips': len(trips),
                 'shift_analyses': [sa.to_dict() for sa in shift_analyses],
                 'trips': [trip.to_dict() for trip in trips],
-                'timezone': timezone
+                'timezone': timezone,
+                'raw_history': history_data.get('history', [])  # Store raw history for trip report
             }
             
             # Save individual analysis if configured
@@ -550,6 +553,14 @@ class FleetAnalyzer:
             shifts_df = pd.DataFrame(shift_summary_data)
             shifts_df.to_csv(output_path / 'shift_analysis_summary.csv', index=False, encoding='utf-8')
             logger.info(f"Saved {len(shift_summary_data)} shift analyses with {timezone} timestamps")
+        
+        # Generate trip timeline reports
+        if self.vehicle_analyses:
+            self.trip_report_generator.generate_trip_reports(
+                self.vehicle_analyses,
+                output_path
+            )
+            logger.info("Generated trip timeline reports")
     
     def _save_vehicle_analysis(self, vehicle_id: int, vehicle_name: str,
                              analysis: Dict[str, Any], output_path: Path):

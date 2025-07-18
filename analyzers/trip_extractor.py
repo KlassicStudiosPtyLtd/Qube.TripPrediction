@@ -281,10 +281,23 @@ class TripExtractor:
         return trips
     
     def _create_trip_segment(self, df: pd.DataFrame, start_idx: int, end_idx: int,
-                           from_waypoint: str, to_waypoint: str, segment_id: str) -> Optional[TripSegment]:
+                        from_waypoint: str, to_waypoint: str, segment_id: str) -> Optional[TripSegment]:
         """Create a trip segment from waypoint indices."""
         # Extract route between waypoints
         route_df = df.loc[start_idx:end_idx]
+        
+        # Get times
+        start_time = df.loc[start_idx, 'timestamp']
+        end_time = df.loc[end_idx, 'timestamp']
+        duration = (end_time - start_time).total_seconds() / 60
+        
+        # ADD LOGGING HERE
+        logger.info(f"Creating segment {segment_id}:")
+        logger.info(f"  From: {from_waypoint} at index {start_idx}, time {start_time}")
+        logger.info(f"  To: {to_waypoint} at index {end_idx}, time {end_time}")
+        logger.info(f"  Duration: {duration:.1f} minutes")
+        logger.info(f"  Start event: {df.loc[start_idx, 'reasonCode']} at {df.loc[start_idx, 'placeName']}")
+        logger.info(f"  End event: {df.loc[end_idx, 'reasonCode']} at {df.loc[end_idx, 'placeName']}")
         
         # Calculate distance
         coords = list(zip(route_df['latitude'], route_df['longitude']))
@@ -292,11 +305,6 @@ class TripExtractor:
         
         # Extract route points
         route_points = self._extract_route_points(route_df)
-        
-        # Get times
-        start_time = df.loc[start_idx, 'timestamp']
-        end_time = df.loc[end_idx, 'timestamp']
-        duration = (end_time - start_time).total_seconds() / 60
         
         return TripSegment(
             segment_id=segment_id,
@@ -315,10 +323,18 @@ class TripExtractor:
         """Create a complete three-point trip from collected segments."""
         trip_data = trip_state['current_trip_data']
         segments = trip_state['segments']
-        
+
         if not segments:
             return None
+
+        logger.info(f"Creating three-point trip for vehicle {vehicle_id}")
+        logger.info(f"Number of segments: {len(segments)}")
+        for i, seg in enumerate(segments):
+            logger.info(f"  Segment {i}: {seg.from_waypoint} -> {seg.to_waypoint}")
+            logger.info(f"    Start: {seg.start_time}, End: {seg.end_time}")
+            logger.info(f"    Duration: {seg.duration_minutes:.1f} min")
         
+       
         # Calculate total metrics
         total_distance = sum(seg.distance_m for seg in segments)
         start_time = trip_data['start_time']
@@ -343,6 +359,8 @@ class TripExtractor:
             start_time = pytz.UTC.localize(start_time)
         if end_time.tzinfo is None:
             end_time = pytz.UTC.localize(end_time)
+
+
         
         # Create Trip object
         return Trip(
