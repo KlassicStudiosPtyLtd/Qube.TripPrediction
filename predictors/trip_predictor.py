@@ -135,16 +135,28 @@ class TripPredictor:
         factors['round_trip_type'] = 'three_point'
         factors['total_segments'] = len(segments)
         
+        # Calculate overtime impact
+        overtime_impact = self.calculate_overtime_impact(shift, completion_time)
+        if overtime_impact['overtime_hours'] > 0:
+            factors.update(overtime_impact)
+        
+        # Generate recommendation
+        recommendation = self._generate_three_point_recommendation(
+            will_complete, risk_level, time_to_shift_end, 
+            total_duration, factors, segment_predictions
+        )
+        
+        # Add overtime warning to recommendation
+        if overtime_impact['warning'] and self.config.shift_detection_mode == 'driver_based':
+            recommendation += f"\n\n⚠️ OVERTIME WARNING: {overtime_impact['warning']}"
+        
         return TripPrediction(
             estimated_duration_minutes=total_duration,
             confidence_score=overall_confidence,
             estimated_completion_time=completion_time,
             will_complete_in_shift=will_complete,
             risk_level=risk_level,
-            recommendation=self._generate_three_point_recommendation(
-                will_complete, risk_level, time_to_shift_end, 
-                total_duration, factors, segment_predictions
-            ),
+            recommendation=recommendation,
             factors=factors,
             segment_predictions=segment_predictions,
             total_segments=len(segments)
@@ -437,16 +449,28 @@ class TripPredictor:
         factors['time_to_shift_end'] = time_to_shift_end
         factors['risk_details'] = risk_details
         
+        # Calculate overtime impact
+        overtime_impact = self.calculate_overtime_impact(shift, completion_time)
+        if overtime_impact['overtime_hours'] > 0:
+            factors.update(overtime_impact)
+        
+        # Generate recommendation
+        recommendation = self._generate_detailed_trip_recommendation(
+            will_complete, risk_level, time_to_shift_end, 
+            adjusted_duration, factors
+        )
+        
+        # Add overtime warning to recommendation
+        if overtime_impact['warning'] and self.config.shift_detection_mode == 'driver_based':
+            recommendation += f"\n\n⚠️ OVERTIME WARNING: {overtime_impact['warning']}"
+        
         return TripPrediction(
             estimated_duration_minutes=adjusted_duration,
             confidence_score=confidence,
             estimated_completion_time=completion_time,
             will_complete_in_shift=will_complete,
             risk_level=risk_level,
-            recommendation=self._generate_detailed_trip_recommendation(
-                will_complete, risk_level, time_to_shift_end, 
-                adjusted_duration, factors
-            ),
+            recommendation=recommendation,
             factors=factors
         )
     
@@ -667,3 +691,99 @@ class TripPredictor:
         details.append(f"\nRecommendation: {action}")
         
         return "\n".join(details)
+    
+    def calculate_overtime_impact(self, shift: Shift, completion_time: datetime,
+                                 base_hourly_rate: float = 50.0) -> Dict[str, Any]:
+        """
+        Calculate overtime impact if trip completion would cause overtime.
+        
+        Args:
+            shift: Current shift
+            completion_time: Predicted trip completion time
+            base_hourly_rate: Base hourly rate for cost calculations
+            
+        Returns:
+            Dictionary with overtime hours and cost
+        """
+        if self.config.shift_detection_mode != 'driver_based':
+            return {'overtime_hours': 0.0, 'overtime_cost': 0.0, 'warning': None}
+        
+        # Calculate shift duration at completion
+        shift_duration_at_completion = (completion_time - shift.start_time).total_seconds() / 3600
+        
+        # Check if this would exceed normal shift hours
+        overtime_hours = max(0, shift_duration_at_completion - self.config.shift_duration_hours)
+        
+        # Calculate cost (assuming 1.5x rate for overtime)
+        overtime_rate = base_hourly_rate * 1.5
+        overtime_cost = overtime_hours * overtime_rate
+        
+        # Generate warning if applicable
+        warning = None
+        if overtime_hours > 0:
+            if shift_duration_at_completion > self.config.max_shift_duration_hours:
+                warning = f"CRITICAL: Trip would exceed maximum shift duration ({self.config.max_shift_duration_hours}h)"
+            else:
+                warning = f"Trip completion would result in {overtime_hours:.1f}h overtime (${overtime_cost:.2f})"
+        
+        return {
+            'overtime_hours': overtime_hours,
+            'overtime_cost': overtime_cost,
+            'projected_shift_duration': shift_duration_at_completion,
+            'warning': warning
+        }
+    
+    def recommend_trip_reduction(self, shift: Shift, current_time: datetime,
+                               remaining_trips: int) -> Dict[str, Any]:
+        """
+        Recommend how many trips to reduce to avoid overtime.
+        
+        Args:
+            shift: Current shift
+            current_time: Current time
+            remaining_trips: Number of trips planned
+            
+        Returns:
+            Dictionary with recommendations
+        """
+        if self.config.shift_detection_mode != 'driver_based':
+            return {'reduce_by': 0, 'reason': 'Not in driver-based mode'}
+        
+        # Calculate time remaining in normal shift
+        normal_shift_end = shift.start_time + timedelta(hours=self.config.shift_duration_hours)
+        time_remaining = (normal_shift_end - current_time).total_seconds() / 60
+        
+        if time_remaining <= 0:
+            return {
+                'reduce_by': remaining_trips,
+                'reason': 'Already in overtime',
+                'time_remaining': 0
+            }
+        
+        # Estimate how many trips can be completed without overtime
+        avg_trip_duration = self._calculate_average_trip_duration(shift)
+        trips_possible = int(time_remaining / avg_trip_duration) if avg_trip_duration > 0 else 0
+        
+        reduce_by = max(0, remaining_trips - trips_possible)
+        
+        return {
+            'reduce_by': reduce_by,
+            'trips_possible': trips_possible,
+            'time_remaining': time_remaining,
+            'avg_trip_duration': avg_trip_duration,
+            'reason': f'Can complete {trips_possible} trips in {time_remaining:.0f} min without overtime'
+        }
+    
+    def _calculate_average_trip_duration(self, shift: Shift) -> float:
+        """Calculate average trip duration including breaks."""
+        if not shift.trips:
+            return self.config.default_trip_duration_minutes
+        
+        # For three-point mode, use complete round trip durations
+        if self.config.round_trip_mode == 'three_point':
+            complete_trips = [t for t in shift.trips if t.is_complete_round_trip]
+            if complete_trips:
+                return np.mean([t.duration_minutes for t in complete_trips])
+        
+        # Otherwise use all trips
+        return np.mean([t.duration_minutes for t in shift.trips])

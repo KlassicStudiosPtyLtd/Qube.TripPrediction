@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 import pytz
 
-from models import Trip
+from models import Trip, TripSegment
 
 logger = logging.getLogger(__name__)
 
@@ -895,3 +895,110 @@ class TripReportGenerator:
             is_complete_round_trip=trip_dict.get('is_complete_round_trip', False),
             target_waypoint=trip_dict.get('target_waypoint')
         )
+    
+    def generate_driver_shift_performance_report(self, fleet_analyses: List[Dict[str, Any]], 
+                                               output_path: Path) -> Path:
+        """
+        Generate driver shift performance report with overtime analysis.
+        
+        Args:
+            fleet_analyses: List of vehicle analysis results
+            output_path: Output directory path
+            
+        Returns:
+            Path to generated report
+        """
+        driver_data = []
+        
+        for vehicle_analysis in fleet_analyses:
+            vehicle_id = vehicle_analysis.get('vehicle_id')
+            vehicle_name = vehicle_analysis.get('vehicle_name')
+            vehicle_ref = vehicle_analysis.get('vehicle_ref')
+            
+            for shift_analysis in vehicle_analysis.get('shift_analyses', []):
+                metrics = shift_analysis.get('metrics', {})
+                shift = shift_analysis.get('shift', {})
+                
+                # Skip if no driver info
+                driver_id = metrics.get('driver_id') or shift.get('driver_id')
+                if not driver_id or driver_id == 'UNKNOWN':
+                    continue
+                
+                # Calculate shift times
+                shift_start = shift.get('start_time')
+                shift_end = shift.get('actual_end_time') or shift.get('end_time')
+                
+                if shift_start and shift_end:
+                    # Parse timestamps
+                    if isinstance(shift_start, str):
+                        shift_start = datetime.fromisoformat(shift_start.replace('Z', '+00:00'))
+                    if isinstance(shift_end, str):
+                        shift_end = datetime.fromisoformat(shift_end.replace('Z', '+00:00'))
+                    
+                    # Convert to local timezone
+                    local_start = shift_start.astimezone(self.tz)
+                    local_end = shift_end.astimezone(self.tz)
+                    
+                    driver_data.append({
+                        'shift_date': local_start.strftime('%Y-%m-%d'),
+                        'driver_id': driver_id,
+                        'driver_name': metrics.get('driver_name') or 'Unknown',
+                        'driver_ref': metrics.get('driver_ref') or driver_id,
+                        'vehicle_id': vehicle_id,
+                        'vehicle_ref': vehicle_ref,
+                        'vehicle_name': vehicle_name,
+                        'shift_start': local_start.strftime('%Y-%m-%d %H:%M'),
+                        'shift_end': local_end.strftime('%Y-%m-%d %H:%M'),
+                        'shift_duration_hours': metrics.get('shift_duration_hours', 0),
+                        'overtime_hours': metrics.get('overtime_hours', 0),
+                        'overtime_cost': metrics.get('overtime_cost', 0),
+                        'trips_completed': metrics.get('trips_completed', 0),
+                        'trips_target': metrics.get('trips_target', 0),
+                        'avg_trip_duration': metrics.get('avg_trip_duration', 0),
+                        'can_complete_target': shift_analysis.get('can_complete_target', False),
+                        'risk_level': shift_analysis.get('risk_level', 'low'),
+                        'incomplete_round_trips': metrics.get('incomplete_round_trips', 0)
+                    })
+        
+        # Create DataFrame
+        df = pd.DataFrame(driver_data)
+        
+        if not df.empty:
+            # Sort by date and driver
+            df = df.sort_values(['shift_date', 'driver_name', 'shift_start'])
+            
+            # Calculate summary statistics
+            summary_stats = {
+                'total_drivers': df['driver_id'].nunique(),
+                'total_shifts': len(df),
+                'total_overtime_hours': df['overtime_hours'].sum(),
+                'total_overtime_cost': df['overtime_cost'].sum(),
+                'drivers_with_overtime': len(df[df['overtime_hours'] > 0]['driver_id'].unique()),
+                'avg_shift_duration': df['shift_duration_hours'].mean(),
+                'completion_rate': len(df[df['can_complete_target']]) / len(df) if len(df) > 0 else 0
+            }
+            
+            # Save detailed report
+            report_file = output_path / f'driver_shift_performance_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+            df.to_csv(report_file, index=False, encoding='utf-8')
+            
+            # Save summary
+            summary_file = output_path / f'driver_shift_summary_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+            with open(summary_file, 'w') as f:
+                f.write("Driver Shift Performance Summary\n")
+                f.write("=" * 40 + "\n\n")
+                f.write(f"Total Drivers: {summary_stats['total_drivers']}\n")
+                f.write(f"Total Shifts: {summary_stats['total_shifts']}\n")
+                f.write(f"Average Shift Duration: {summary_stats['avg_shift_duration']:.1f} hours\n")
+                f.write(f"Target Completion Rate: {summary_stats['completion_rate']:.1%}\n\n")
+                f.write(f"Overtime Analysis:\n")
+                f.write(f"  Drivers with Overtime: {summary_stats['drivers_with_overtime']}\n")
+                f.write(f"  Total Overtime Hours: {summary_stats['total_overtime_hours']:.1f}\n")
+                f.write(f"  Total Overtime Cost: ${summary_stats['total_overtime_cost']:.2f}\n")
+            
+            logger.info(f"Saved driver shift performance report with {len(df)} shifts")
+            
+            return report_file
+        else:
+            logger.warning("No driver shift data found")
+            return None

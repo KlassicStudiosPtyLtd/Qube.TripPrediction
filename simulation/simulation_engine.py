@@ -284,10 +284,14 @@ class SimulationEngine:
         # Store analysis time for shift analyzer to use
         self.shift_analyzer.analysis_end_time = simulation_time
         
-        # Get the current shift period
-        current_shift_start, current_shift_end = self.shift_analyzer._identify_shift_period(
-            simulation_time, timezone
-        )
+        # Get the current shift period (only needed for fixed-time mode)
+        if self.shift_config.shift_detection_mode == 'fixed_time':
+            current_shift_start, current_shift_end = self.shift_analyzer._identify_shift_period(
+                simulation_time, timezone
+            )
+        else:
+            # For driver-based mode, we don't use fixed shift periods
+            current_shift_start = current_shift_end = None
         
         for vehicle_id, full_history in all_vehicle_data.items():
             # Get vehicle info
@@ -332,6 +336,14 @@ class SimulationEngine:
             # Extract trips from available data
             trips = self.trip_extractor.extract_trips(vehicle_data)
             
+            # Split trips at driver changes if in driver-based mode
+            if self.shift_config.shift_detection_mode == 'driver_based':
+                original_trip_count = len(trips)
+                trips = self.trip_extractor.split_trips_at_driver_changes(
+                    trips, available_data
+                )
+                logger.debug(f"Vehicle {vehicle_id}: Split {original_trip_count} trips into {len(trips)} trips")
+            
             # Filter trips to only those that started before simulation time
             relevant_trips = [
                 trip for trip in trips 
@@ -341,15 +353,57 @@ class SimulationEngine:
             # Analyze shifts with proper boundaries
             shift_analyses = self.shift_analyzer.analyze_shifts(
                 vehicle_id, vehicle_name, relevant_trips, timezone,
-                analysis_end_time=simulation_time
+                analysis_end_time=simulation_time,
+                history_data=available_data
             )
+            
+            # Debug logging for driver-based mode
+            if self.shift_config.shift_detection_mode == 'driver_based':
+                logger.info(f"=== Vehicle {vehicle_id} ({vehicle_name}) at {simulation_time} ===")
+                logger.info(f"  Found {len(relevant_trips)} relevant trips")
+                logger.info(f"  Generated {len(shift_analyses)} shift analyses")
+                
+                if not shift_analyses:
+                    logger.info("  NO SHIFT ANALYSES GENERATED")
+                    
+                for i, sa in enumerate(shift_analyses):
+                    shift = sa.shift
+                    logger.info(f"  Shift {i}: {shift.start_time} to {shift.end_time} (driver: {shift.driver_id})")
+                    logger.info(f"    Alert required: {sa.alert_required}, Risk: {sa.risk_level}")
+                    logger.info(f"    Trips completed: {sa.metrics.get('trips_completed', 0)}/{sa.metrics.get('trips_target', 0)}")
+                    effective_end = shift.actual_end_time if shift.actual_end_time else shift.end_time
+                    in_range = shift.start_time <= simulation_time <= effective_end
+                    logger.info(f"    Time in range: {in_range} (sim: {simulation_time}, end: {effective_end})")
+                    
+                    # Check specific alert conditions
+                    time_into_shift = sa.metrics.get('time_into_shift_hours', 0)
+                    logger.info(f"    Time into shift: {time_into_shift} hours")
+                    logger.info(f"    Alert conditions: risk={sa.risk_level} in ['high','critical'] = {sa.risk_level in ['high', 'critical']}")
+                    logger.info(f"    Alert conditions: time_into_shift >= 1.0 = {time_into_shift >= 1.0}")
+                    
+                if len(relevant_trips) == 0:
+                    logger.info("  NO RELEVANT TRIPS FOUND")
             
             # Only process the current active shift
             for shift_analysis in shift_analyses:
                 shift = shift_analysis.shift
                 
                 # Check if this is the current shift
-                if shift.start_time == current_shift_start and shift.end_time == current_shift_end:
+                # For driver-based shifts, check if simulation time is within the shift period
+                # For fixed-time shifts, check if it matches the standard shift boundaries
+                if self.shift_config.shift_detection_mode == 'driver_based':
+                    # Driver-based: check if simulation time is within the driver's actual shift
+                    # Use actual_end_time if available (for overtime shifts), otherwise use regular end_time
+                    effective_end_time = shift.actual_end_time if shift.actual_end_time else shift.end_time
+                    is_current_shift = shift.start_time <= simulation_time <= effective_end_time
+                    logger.info(f"    Driver-based shift check: {shift.start_time} <= {simulation_time} <= {effective_end_time} = {is_current_shift}")
+                else:
+                    # Fixed-time: check if it matches the standard shift boundaries
+                    is_current_shift = (shift.start_time == current_shift_start and shift.end_time == current_shift_end)
+                    logger.info(f"    Fixed-time shift check: shift times match boundaries = {is_current_shift}")
+                
+                if is_current_shift:
+                    logger.info(f"    PROCESSING SHIFT - Creating simulation point and checking alerts")
                     # Create simulation point
                     point = self._create_simulation_point(
                         simulation_time, vehicle_id, vehicle_name, vehicle_ref, 
@@ -359,11 +413,16 @@ class SimulationEngine:
                     
                     # Check for alerts (shift_analysis already considers time into shift)
                     if shift_analysis.alert_required:
+                        logger.info(f"    ALERT GENERATED for {vehicle_name}")
                         alert = self._create_simulation_alert(
                             simulation_time, vehicle_id, vehicle_name, vehicle_ref,
                             shift_analysis
                         )
                         alerts.append(alert)
+                    else:
+                        logger.info(f"    No alert required for {vehicle_name}")
+                else:
+                    logger.info(f"    SKIPPING SHIFT - Not current shift")
         
         return {
             'points': points,

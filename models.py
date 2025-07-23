@@ -49,6 +49,10 @@ class Trip:
     is_complete_round_trip: bool = False  # True when all required waypoints visited
     target_waypoint: Optional[str] = None  # For three-point trips
     
+    # Driver-based shift detection fields
+    is_partial: bool = False  # True if trip was split at driver change
+    handover_reason: Optional[str] = None  # Reason for trip handover
+    
     def __post_init__(self):
         """Ensure timestamps are timezone-aware."""
         # If timestamps are naive, assume they're UTC
@@ -104,7 +108,9 @@ class Trip:
                     'duration_minutes': seg.duration_minutes,
                     'distance_m': seg.distance_m
                 } for seg in self.trip_segments
-            ]
+            ],
+            'is_partial': self.is_partial,
+            'handover_reason': self.handover_reason
         }
 
 
@@ -118,6 +124,11 @@ class Shift:
     end_time: datetime    # Should be timezone-aware
     trips: List[Trip] = field(default_factory=list)
     
+    # Driver-based shift fields
+    driver_name: Optional[str] = None  # Human-readable driver name
+    driver_ref: Optional[str] = None   # Driver reference/ID
+    actual_end_time: Optional[datetime] = None  # For overtime calculation
+    
     def __post_init__(self):
         """Ensure timestamps are timezone-aware."""
         # If timestamps are naive, assume they're UTC
@@ -130,6 +141,19 @@ class Shift:
     def duration_hours(self) -> float:
         """Get shift duration in hours."""
         return (self.end_time - self.start_time).total_seconds() / 3600
+    
+    @property
+    def actual_duration_hours(self) -> float:
+        """Get actual shift duration in hours (for overtime calculation)."""
+        if self.actual_end_time:
+            return (self.actual_end_time - self.start_time).total_seconds() / 3600
+        return self.duration_hours
+    
+    @property
+    def overtime_hours(self) -> float:
+        """Calculate overtime hours (time worked beyond shift_duration_hours)."""
+        # This will be calculated by the shift analyzer using config
+        return 0.0  # Default, will be overridden in analysis
     
     @property
     def trips_completed(self) -> int:
@@ -159,7 +183,10 @@ class Shift:
             'trips': [trip.to_dict() for trip in self.trips],
             'trips_completed': self.trips_completed,
             'complete_round_trips': self.complete_round_trips,
-            'incomplete_round_trips': len(self.incomplete_round_trips)
+            'incomplete_round_trips': len(self.incomplete_round_trips),
+            'driver_name': self.driver_name,
+            'driver_ref': self.driver_ref,
+            'actual_end_time': self.actual_end_time.isoformat() if self.actual_end_time else None
         }
 
 

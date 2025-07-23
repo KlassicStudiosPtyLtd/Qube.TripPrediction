@@ -303,6 +303,143 @@
                 "PYTHONPATH": "${workspaceFolder}"
             },
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver-Based Three-Point Simulation - PLS - PRM00843",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--vehicle-ref", "PRM00843",
+                "--start-date", "2025-07-9",
+                "--end-date", "2025-07-10",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "1.0",
+                "--output-dir", "./simulation_results/PLS/PRM00843/driver_based",
+                "--shift-hours", "12",
+                "--target-trips", "5",
+                "--round-trip-mode", "three_point",
+                "--start-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--target-waypoint", "PLS Mine site_PHEHR190325",
+                "--end-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--waypoint-matching", "exact",
+                "--require-waypoint-order",
+                "--segment-duration-start-target", "120",
+                "--segment-duration-target-end", "120",
+                "--shift-detection-mode", "driver_based",
+                "--max-shift-hours", "15",
+                "--baseline-days", "30",
+                "--generate-trip-reports",
+                "--cache-dir", "./simulation_cache/driver_based",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver-Based Three-Point Simulation - PLS",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
+            "args": [
+                "--fleet-id", "104002",
+                 "--start-date", "2025-07-9",
+                "--end-date", "2025-07-10",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "1.0",
+                "--output-dir", "./simulation_results/PLS/driver_based",
+                "--shift-hours", "12",
+                "--target-trips", "5",
+                "--round-trip-mode", "three_point",
+                "--start-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--target-waypoint", "PLS Mine site_PHEHR190325",
+                "--end-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--waypoint-matching", "exact",
+                "--require-waypoint-order",
+                "--segment-duration-start-target", "120",
+                "--segment-duration-target-end", "120",
+                "--shift-detection-mode", "driver_based",
+                "--max-shift-hours", "15",
+                "--baseline-days", "30",
+                "--generate-trip-reports",
+                "--cache-dir", "./simulation_cache/driver_based",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver-Based Three-Point Simulation WEEK - PLS - PRM00843",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/simulation/run_simulation.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--vehicle-ref", "PRM00843",
+                "--start-date", "2025-07-9 06:00:00",
+                "--end-date", "2025-07-16 18:00:00",
+                "--timezone", "Australia/Perth",
+                "--interval-hours", "1.0",
+                "--output-dir", "./simulation_results/PLS/PRM00843/driver_based_week",
+                "--shift-hours", "12",
+                "--target-trips", "4",
+                "--round-trip-mode", "three_point",
+                "--start-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--target-waypoint", "PLS Mine site_PHEHR190325",
+                "--end-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--waypoint-matching", "exact",
+                "--require-waypoint-order",
+                "--segment-duration-start-target", "120",
+                "--segment-duration-target-end", "120",
+                "--shift-detection-mode", "driver_based",
+                "--max-shift-hours", "15",
+                "--baseline-days", "30",
+                "--generate-trip-reports",
+                "--cache-dir", "./simulation_cache/PLS/PRM00843/driver_based_week",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug Driver Shifts - PRM00843",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--vehicle-ref", "PRM00843",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-10",
+                "--timezone", "Australia/Perth",
+                "--shift-hours", "12",
+                "--target-trips", "5",
+                "--max-shift-hours", "15",
+                "--round-trip-mode", "three_point",
+                "--start-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--target-waypoint", "PLS Mine site_PHEHR190325",
+                "--end-waypoint", "QUBE Wedgefield Yard_PHEVG180415",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

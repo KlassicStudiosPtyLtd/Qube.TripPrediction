@@ -264,11 +264,18 @@ class FleetAnalyzer:
             # Extract trips (they'll be in UTC)
             trips = self.trip_extractor.extract_trips(history_data)
             
+            # Split trips at driver changes if in driver-based mode
+            if self.shift_config.shift_detection_mode == 'driver_based':
+                trips = self.trip_extractor.split_trips_at_driver_changes(
+                    trips, history_data.get('history', [])
+                )
+            
             # Analyze shifts with timezone awareness
             # Note: we pass end_datetime as analysis_end_time but it won't truncate shifts
             shift_analyses = self.shift_analyzer.analyze_shifts(
                 vehicle_id, vehicle_name, trips, timezone, 
-                analysis_end_time=end_datetime
+                analysis_end_time=end_datetime,
+                history_data=history_data.get('history', [])
             )
             
             # Create vehicle analysis

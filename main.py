@@ -125,6 +125,14 @@ def convert_utc_to_local(utc_datetime: datetime, timezone_str: str) -> datetime:
               help='Default duration for Target->End segment (three-point mode)')
 @click.option('--vehicle-ref', default=None, help='Filter analysis to a specific vehicle by reference (e.g., T123)')
 @click.option('--cache-dir', default=None, help='Directory for caching API responses (speeds up repeated analyses)')
+@click.option('--shift-detection-mode', 
+              type=click.Choice(['fixed_time', 'driver_based']), 
+              default='driver_based',
+              help='Shift detection mode: fixed_time (6am-6pm) or driver_based')
+@click.option('--max-shift-hours', default=15.0, type=float, 
+              help='Maximum allowed shift duration in hours (for overtime cutoff)')
+@click.option('--baseline-days', default=30, type=int, 
+              help='Number of days to use for performance baseline comparison')
 @click.option('--parallel', is_flag=True, default=True, help='Enable parallel processing')
 @click.option('--max-workers', default=4, type=int, help='Maximum parallel workers')
 @click.option('--log-level', default='INFO', help='Logging level')
@@ -136,14 +144,26 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
          require_waypoint_order: bool, allow_partial_trips: bool,
          segment_duration_start_target: float, segment_duration_target_end: float,
          vehicle_ref: str, cache_dir: str,
+         shift_detection_mode: str, max_shift_hours: float, baseline_days: int,
          parallel: bool, max_workers: int, log_level: str):
     """
-    Analyze fleet-wide shift completion with three-point round trip support.
+    Analyze fleet-wide shift completion with driver-based shift detection and overtime awareness.
     
-    The system supports two modes:
+    The system supports two shift detection modes:
+    
+    1. Fixed Time Mode: Traditional 6am-6pm / 6pm-6am shifts
+    2. Driver-Based Mode: Shifts detected by driver changes with overtime tracking
+    
+    The system also supports two trip modes:
     
     1. Simple Mode: Traditional two-point trips (A → B or A → B → A)
     2. Three-Point Mode: Complex round trips (A → B → C)
+    
+    Driver-Based Features:
+    - Automatic shift detection when drivers change
+    - Trip splitting when driver handovers occur mid-trip
+    - Overtime calculation and cost tracking
+    - Performance analysis comparing drivers on same routes
     
     Three-Point Round Trip Example:
         Start: Depot
@@ -243,7 +263,13 @@ def main(fleet_id: int, start_date: str, end_date: str, timezone: str, output_di
             require_waypoint_order=require_waypoint_order,
             allow_partial_trips=allow_partial_trips,
             default_segment_durations=default_segment_durations,
-            timezone=timezone
+            timezone=timezone,
+            shift_detection_mode=shift_detection_mode,
+            max_shift_duration_hours=max_shift_hours,
+            baseline_period_days=baseline_days,
+            handle_missing_driver='assign_unknown',
+            long_dwell_threshold_minutes=30.0,
+            slow_speed_threshold_percent=0.8
         )
         
         analysis_config = AnalysisConfig(

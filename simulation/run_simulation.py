@@ -138,6 +138,14 @@ def wait_for_user_input():
               help='Disable caching even if cache-dir is set')
 @click.option('--interactive', is_flag=True, default=False,
               help='Interactive mode: pause after each time period to show alerts and wait for user input')
+@click.option('--shift-detection-mode', 
+              type=click.Choice(['fixed_time', 'driver_based']), 
+              default='driver_based',
+              help='Shift detection mode: fixed_time (6am-6pm) or driver_based')
+@click.option('--max-shift-hours', default=15.0, type=float, 
+              help='Maximum allowed shift duration in hours (for overtime cutoff)')
+@click.option('--baseline-days', default=30, type=int, 
+              help='Number of days to use for performance baseline comparison')
 @click.option('--log-level', default='INFO', help='Logging level')
 @click.option('--generate-trip-reports', is_flag=True, default=False,
               help='Generate trip timeline reports after simulation using cached data')
@@ -151,6 +159,7 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
                   round_trip_mode: str, require_waypoint_order: bool,
                   allow_partial_trips: bool, segment_duration_start_target: float,
                   segment_duration_target_end: float,
+                  shift_detection_mode: str, max_shift_hours: float, baseline_days: int,
                   generate_trip_reports: bool,
                   cache_dir: str, no_cache: bool, interactive: bool, log_level: str):
     """
@@ -238,7 +247,13 @@ def run_simulation(fleet_id: int, start_date: str, end_date: str, timezone: str,
             require_waypoint_order=require_waypoint_order,
             allow_partial_trips=allow_partial_trips,
             default_segment_durations=default_segment_durations,
-            timezone=timezone
+            timezone=timezone,
+            shift_detection_mode=shift_detection_mode,
+            max_shift_duration_hours=max_shift_hours,
+            baseline_period_days=baseline_days,
+            handle_missing_driver='assign_unknown',
+            long_dwell_threshold_minutes=30.0,
+            slow_speed_threshold_percent=0.8
         )
         
         analysis_config = AnalysisConfig(

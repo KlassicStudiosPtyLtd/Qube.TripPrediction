@@ -168,7 +168,7 @@ class TripExtractor:
                         'start_idx': idx,
                         'start_time': row['timestamp'],
                         'start_location': (row['latitude'], row['longitude']),
-                        'driver_id': row.get('driverId'),
+                        'driver_id': row.get('driverId') or ('UNKNOWN' if self.config.handle_missing_driver == 'assign_unknown' else None),
                         'segment_start_idx': idx,
                         'segment_start_time': row['timestamp'],
                         'segment_start_location': (row['latitude'], row['longitude'])
@@ -292,12 +292,12 @@ class TripExtractor:
         duration = (end_time - start_time).total_seconds() / 60
         
         # ADD LOGGING HERE
-        logger.info(f"Creating segment {segment_id}:")
-        logger.info(f"  From: {from_waypoint} at index {start_idx}, time {start_time}")
-        logger.info(f"  To: {to_waypoint} at index {end_idx}, time {end_time}")
-        logger.info(f"  Duration: {duration:.1f} minutes")
-        logger.info(f"  Start event: {df.loc[start_idx, 'reasonCode']} at {df.loc[start_idx, 'placeName']}")
-        logger.info(f"  End event: {df.loc[end_idx, 'reasonCode']} at {df.loc[end_idx, 'placeName']}")
+        logger.debug(f"Creating segment {segment_id}:")
+        logger.debug(f"  From: {from_waypoint} at index {start_idx}, time {start_time}")
+        logger.debug(f"  To: {to_waypoint} at index {end_idx}, time {end_time}")
+        logger.debug(f"  Duration: {duration:.1f} minutes")
+        logger.debug(f"  Start event: {df.loc[start_idx, 'reasonCode']} at {df.loc[start_idx, 'placeName']}")
+        logger.debug(f"  End event: {df.loc[end_idx, 'reasonCode']} at {df.loc[end_idx, 'placeName']}")
         
         # Calculate distance
         coords = list(zip(route_df['latitude'], route_df['longitude']))
@@ -330,9 +330,9 @@ class TripExtractor:
         logger.info(f"Creating three-point trip for vehicle {vehicle_id}")
         logger.info(f"Number of segments: {len(segments)}")
         for i, seg in enumerate(segments):
-            logger.info(f"  Segment {i}: {seg.from_waypoint} -> {seg.to_waypoint}")
-            logger.info(f"    Start: {seg.start_time}, End: {seg.end_time}")
-            logger.info(f"    Duration: {seg.duration_minutes:.1f} min")
+            logger.debug(f"  Segment {i}: {seg.from_waypoint} -> {seg.to_waypoint}")
+            logger.debug(f"    Start: {seg.start_time}, End: {seg.end_time}")
+            logger.debug(f"    Duration: {seg.duration_minutes:.1f} min")
         
        
         # Calculate total metrics
@@ -766,3 +766,201 @@ class TripExtractor:
             })
         
         return route_points
+    
+    def split_trips_at_driver_changes(self, trips: List[Trip], history_data: List[Dict[str, Any]]) -> List[Trip]:
+        """
+        Split trips when driver changes occur mid-trip.
+        
+        Args:
+            trips: List of trips to check for driver changes
+            history_data: Raw history data with driver information
+            
+        Returns:
+            List of trips with splits at driver changes
+        """
+        if self.config.shift_detection_mode != 'driver_based':
+            return trips
+        
+        split_trips = []
+        
+        for trip in trips:
+            # Check if driver changed during this trip
+            driver_changes = self._detect_driver_changes_during_trip(
+                trip, history_data
+            )
+            
+            if not driver_changes:
+                # No driver changes, keep trip as is
+                split_trips.append(trip)
+            else:
+                # Split the trip at each driver change
+                split_parts = self._split_trip_at_changes(trip, driver_changes)
+                split_trips.extend(split_parts)
+        
+        return split_trips
+    
+    def _detect_driver_changes_during_trip(self, trip: Trip, 
+                                          history_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Detect if driver changed during a trip.
+        
+        Args:
+            trip: Trip to check
+            history_data: Raw history data
+            
+        Returns:
+            List of driver changes with timestamps and locations
+        """
+        changes = []
+        
+        # Filter history data to trip time period
+        trip_history = []
+        for record in history_data:
+            timestamp = record.get('deviceTimeUtc') or record.get('timestamp')
+            if timestamp:
+                if isinstance(timestamp, str):
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                elif isinstance(timestamp, (int, float)):
+                    timestamp = datetime.fromtimestamp(timestamp, pytz.UTC)
+                
+                if timestamp.tzinfo is None:
+                    timestamp = pytz.UTC.localize(timestamp)
+                
+                if trip.start_time <= timestamp <= trip.end_time:
+                    trip_history.append({
+                        'timestamp': timestamp,
+                        'driver_id': record.get('driverId') or 'UNKNOWN',
+                        'driver_name': record.get('driverName'),
+                        'latitude': record.get('latitude'),
+                        'longitude': record.get('longitude'),
+                        'place_name': record.get('placeName')
+                    })
+        
+        # Sort by timestamp
+        trip_history.sort(key=lambda x: x['timestamp'])
+        
+        # Detect changes
+        prev_driver = trip.driver_id or 'UNKNOWN'
+        for record in trip_history:
+            current_driver = record['driver_id']
+            if current_driver != prev_driver:
+                changes.append({
+                    'timestamp': record['timestamp'],
+                    'from_driver': prev_driver,
+                    'to_driver': current_driver,
+                    'driver_name': record.get('driver_name'),
+                    'location': (record['latitude'], record['longitude']),
+                    'place_name': record.get('place_name')
+                })
+                prev_driver = current_driver
+        
+        return changes
+    
+    def _split_trip_at_changes(self, trip: Trip, 
+                              driver_changes: List[Dict[str, Any]]) -> List[Trip]:
+        """
+        Split a trip at driver change points.
+        
+        Args:
+            trip: Trip to split
+            driver_changes: List of driver changes with timestamps
+            
+        Returns:
+            List of split trips
+        """
+        split_trips = []
+        
+        # Sort changes by timestamp
+        driver_changes.sort(key=lambda x: x['timestamp'])
+        
+        # Create trips for each segment
+        start_time = trip.start_time
+        start_driver = trip.driver_id or 'UNKNOWN'
+        
+        for i, change in enumerate(driver_changes):
+            change_time = change['timestamp']
+            
+            # Calculate split ratio based on time
+            total_duration = (trip.end_time - trip.start_time).total_seconds()
+            segment_duration = (change_time - start_time).total_seconds()
+            split_ratio = segment_duration / total_duration if total_duration > 0 else 0.5
+            
+            # Create partial trip for current driver
+            partial_trip = Trip(
+                trip_id=f"{trip.trip_id}_part{i+1}",
+                vehicle_id=trip.vehicle_id,
+                driver_id=start_driver,
+                start_place=trip.start_place if i == 0 else f"Handover at {change.get('place_name', 'Unknown')}",
+                end_place=f"Handover at {change.get('place_name', 'Unknown')}",
+                start_time=start_time,
+                end_time=change_time,
+                duration_minutes=(segment_duration / 60),
+                distance_m=trip.distance_m * split_ratio,  # Proportional split
+                route=self._split_route(trip.route, start_time, change_time),
+                is_round_trip=False,  # Partial trips are not complete round trips
+                trip_type=trip.trip_type,
+                trip_segments=[],  # Will be recalculated if needed
+                waypoints_visited=trip.waypoints_visited if i == 0 else [],
+                is_complete_round_trip=False,
+                target_waypoint=trip.target_waypoint,
+                is_partial=True,
+                handover_reason=f"Driver change: {change['from_driver']} to {change['to_driver']}"
+            )
+            split_trips.append(partial_trip)
+            
+            # Update for next segment
+            start_time = change_time
+            start_driver = change['to_driver']
+        
+        # Create final segment
+        final_duration = (trip.end_time - start_time).total_seconds()
+        final_ratio = final_duration / total_duration if total_duration > 0 else 0.5
+        
+        final_trip = Trip(
+            trip_id=f"{trip.trip_id}_part{len(driver_changes)+1}",
+            vehicle_id=trip.vehicle_id,
+            driver_id=start_driver,
+            start_place=f"Handover at {driver_changes[-1].get('place_name', 'Unknown')}",
+            end_place=trip.end_place,
+            start_time=start_time,
+            end_time=trip.end_time,
+            duration_minutes=(final_duration / 60),
+            distance_m=trip.distance_m * final_ratio,
+            route=self._split_route(trip.route, start_time, trip.end_time),
+            is_round_trip=False,
+            trip_type=trip.trip_type,
+            trip_segments=[],
+            waypoints_visited=[trip.end_place] if trip.end_place in trip.waypoints_visited else [],
+            is_complete_round_trip=False,
+            target_waypoint=trip.target_waypoint,
+            is_partial=True,
+            handover_reason=f"Continuation after driver change"
+        )
+        split_trips.append(final_trip)
+        
+        return split_trips
+    
+    def _split_route(self, route: List[Dict[str, Any]], 
+                    start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """
+        Split route points based on time range.
+        
+        Args:
+            route: Original route points
+            start_time: Start time for segment
+            end_time: End time for segment
+            
+        Returns:
+            Route points within the time range
+        """
+        segment_route = []
+        
+        for point in route:
+            point_time = datetime.fromisoformat(point['timestamp'])
+            if point_time.tzinfo is None:
+                point_time = pytz.UTC.localize(point_time)
+            
+            if start_time <= point_time <= end_time:
+                segment_route.append(point)
+        
+        return segment_route

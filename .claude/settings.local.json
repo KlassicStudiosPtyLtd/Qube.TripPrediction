@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(set PYTHONPATH=C:CodeQube.TripPrediction)",
+      "Bash(set PYTHONPATH=%CD%)"
+    ],
+    "deny": []
+  }
+}

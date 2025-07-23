@@ -17,6 +17,18 @@ class ShiftConfig:
     fatigue_factor_base: float = 0.05
     default_trip_duration_minutes: float = 45.0
     
+    # Driver-based shift detection
+    shift_detection_mode: str = 'driver_based'  # 'fixed_time' or 'driver_based'
+    max_shift_duration_hours: float = 15.0  # Maximum allowed shift duration
+    handle_missing_driver: str = 'assign_unknown'  # 'skip' or 'assign_unknown'
+    
+    # Performance baseline
+    baseline_period_days: int = 30  # Compare against last 30 days
+    
+    # Analysis thresholds
+    long_dwell_threshold_minutes: float = 30.0  # Flag dwell times longer than this
+    slow_speed_threshold_percent: float = 0.8  # Flag speeds < 80% of baseline
+    
     # Waypoint configuration for three-point round trips
     start_waypoint: Optional[str] = None
     target_waypoint: Optional[str] = None  # NEW: intermediate waypoint for three-point trips
@@ -48,6 +60,12 @@ class ShiftConfig:
             'min_trip_distance_m': self.min_trip_distance_m,
             'fatigue_factor_base': self.fatigue_factor_base,
             'default_trip_duration_minutes': self.default_trip_duration_minutes,
+            'shift_detection_mode': self.shift_detection_mode,
+            'max_shift_duration_hours': self.max_shift_duration_hours,
+            'handle_missing_driver': self.handle_missing_driver,
+            'baseline_period_days': self.baseline_period_days,
+            'long_dwell_threshold_minutes': self.long_dwell_threshold_minutes,
+            'slow_speed_threshold_percent': self.slow_speed_threshold_percent,
             'start_waypoint': self.start_waypoint,
             'target_waypoint': self.target_waypoint,
             'end_waypoint': self.end_waypoint,

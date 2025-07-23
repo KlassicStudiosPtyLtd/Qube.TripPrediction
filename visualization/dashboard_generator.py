@@ -137,6 +137,18 @@ class DashboardGenerator:
                             {summary.get('total_alerts', 0)}
                         </div>
                     </div>
+                    <div class="summary-card">
+                        <h3>Overtime Hours</h3>
+                        <div class="value" style="color: #f57c00;">
+                            {summary.get('total_overtime_hours', 0):.1f}h
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Overtime Cost</h3>
+                        <div class="value" style="color: #d32f2f;">
+                            ${summary.get('total_overtime_cost', 0):.0f}
+                        </div>
+                    </div>
                 </div>
                 
                 {self._generate_alerts_table(alerts, timezone)}
@@ -263,12 +275,16 @@ class DashboardGenerator:
                     'vehicle_name': vehicle_name,
                     'vehicle_ref': vehicle_ref,
                     'driver_id': shift.get('driver_id', 'Unknown'),
+                    'driver_name': metrics.get('driver_name', 'Unknown'),
                     'shift_times': shift_times,
                     'trips_completed': metrics.get('trips_completed', 0),
                     'trips_target': metrics.get('trips_target', 0),
                     'can_complete': shift_analysis.get('can_complete_target', False),
                     'risk_level': shift_analysis.get('risk_level', 'unknown'),
-                    'recommendation': shift_analysis.get('recommendation', '')
+                    'recommendation': shift_analysis.get('recommendation', ''),
+                    'overtime_hours': metrics.get('overtime_hours', 0),
+                    'overtime_cost': metrics.get('overtime_cost', 0),
+                    'projected_overtime_hours': metrics.get('projected_overtime_hours', 0)
                 })
         
         # Sort by date
@@ -285,16 +301,29 @@ class DashboardGenerator:
             completion_symbol = '✓' if shift['can_complete'] else '✗'
             completion_color = '#28a745' if shift['can_complete'] else '#dc3545'
             
+            # Format overtime info
+            overtime_display = ""
+            if shift['overtime_hours'] > 0:
+                overtime_display = f"{shift['overtime_hours']:.1f}h (${shift['overtime_cost']:.0f})"
+            elif shift['projected_overtime_hours'] > 0:
+                overtime_display = f"Proj: {shift['projected_overtime_hours']:.1f}h"
+            else:
+                overtime_display = "None"
+            
+            # Driver display with name if available
+            driver_display = shift['driver_name'] if shift['driver_name'] != 'Unknown' else shift['driver_id']
+            
             rows += f"""
             <tr class="{risk_class}">
                 <td>{shift['date']}</td>
                 <td>{shift['vehicle_name']} ({shift['vehicle_ref']})</td>
-                <td>{shift['driver_id']}</td>
+                <td>{driver_display}</td>
                 <td>{shift['shift_times']}</td>
                 <td>{shift['trips_completed']}/{shift['trips_target']}</td>
                 <td style="color: {completion_color}; font-weight: bold;">{completion_symbol}</td>
                 <td>{shift['risk_level'].upper()}</td>
-                <td>{shift['recommendation']}</td>
+                <td>{overtime_display}</td>
+                <td style="font-size: 12px; max-width: 200px;">{shift['recommendation'][:100]}...</td>
             </tr>
             """
         
@@ -312,6 +341,7 @@ class DashboardGenerator:
                 <th>Trips</th>
                 <th>Target Met</th>
                 <th>Risk Level</th>
+                <th>Overtime</th>
                 <th>Recommendation</th>
             </tr>
             {rows}
