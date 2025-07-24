@@ -109,8 +109,9 @@ class MTDataApiClient:
         """
         try:
             if os.path.exists(config_file):
+                import yaml
                 with open(config_file, 'r') as f:
-                    return config_file.safe_load(f)
+                    return yaml.safe_load(f)
             else:
                 self._logger.warning(f"Config file {config_file} not found, using defaults")
                 return {}

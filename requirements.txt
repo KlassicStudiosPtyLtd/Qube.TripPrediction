@@ -24,6 +24,7 @@ colorlog>=6.7.0
 
 # Date/time handling
 python-dateutil>=2.8.2
+pytz>=2023.3
 
 # Configuration
 pyyaml>=6.0.1

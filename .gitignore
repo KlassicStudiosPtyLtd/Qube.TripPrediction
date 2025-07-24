@@ -60,3 +60,9 @@ simulation_cache/
 #simulation results
 simulation_results/
 simulation_cache.zip
+
+#trip report cache
+trip_report_cache/
+
+#driver shift analysis
+driver_shift_analysis/

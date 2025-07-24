@@ -303,6 +303,154 @@
                 "PYTHONPATH": "${workspaceFolder}"
             },
             "cwd": "${workspaceFolder}"
-        }
+        },
+        {
+            "name": "Driver Shift Detection - Full Fleet Week",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/detect_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-16",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./driver_shift_analysis",
+                "--cache-dir", "./simulation_cache",
+                "--min-shift-duration", "30",
+                "--max-event-gap", "4",
+                "--min-events", "5",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver Shift Detection - Single Vehicle PRM00843",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/detect_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-16",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./driver_shift_analysis/PRM00843",
+                "--cache-dir", "./simulation_cache",
+                "--vehicle-ref", "PRM00843",
+                "--min-shift-duration", "30",
+                "--max-event-gap", "4",
+                "--min-events", "5",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver Shift Detection - Include Idle Periods",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/detect_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-16",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./driver_shift_analysis/with_idle",
+                "--cache-dir", "./simulation_cache",
+                "--vehicle-ref", "PRM00843",
+                "--include-null-drivers",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver Shift Detection - Custom Parameters",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/detect_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-16",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./driver_shift_analysis/custom",
+                "--cache-dir", "./simulation_cache",
+                "--min-shift-duration", "60",
+                "--max-event-gap", "6",
+                "--min-events", "10",
+                "--log-level", "DEBUG"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Driver Shift Detection - API Mode (No Cache)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/detect_driver_shifts.py",
+            "args": [
+                "--fleet-id", "104002",
+                "--start-date", "2025-07-09",
+                "--end-date", "2025-07-10",
+                "--timezone", "Australia/Perth",
+                "--output-dir", "./driver_shift_analysis/api_mode",
+                "--min-shift-duration", "30",
+                "--max-event-gap", "4",
+                "--min-events", "5",
+                "--log-level", "INFO"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "MTDATA_API_USERNAME": "${env:MTDATA_API_USERNAME}",
+                "MTDATA_API_PASSWORD": "${env:MTDATA_API_PASSWORD}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Validate Driver Shift Detection",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/validate_driver_shift_detection.py",
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Test Driver Shift Detection",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_driver_shift_detection.py", 
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+       
     ]
 }
